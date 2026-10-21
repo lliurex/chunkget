@@ -17,7 +17,7 @@ Convenciones:
 | §2 Stack | Solo `python3` (3.10) y su biblioteca estándar en tiempo de ejecución. Desarrollo: `python3-pytest` y `python3-setuptools`, ambos de los repositorios de jammy. Compilación de catálogos: `gettext` (`msgfmt`), también de jammy. No se usan dependencias de `pip` ni YAML (ver D1). |
 | §3 spec + plan antes del código | Este fichero existe antes de escribir código. |
 | §4 Tests | Sección 9. Los tests usan solo un servidor HTTP en `127.0.0.1`, nunca red externa. |
-| §5 Persistencia sin temporales | Se escribe directamente sobre el fichero final. El único fichero auxiliar es el de estado, que no contiene copia del contenido (D8). El manifest remoto se lee en memoria (D5). |
+| §5 Persistencia sin temporales | Se escribe directamente sobre el fichero final. El único fichero auxiliar es el de estado, que no contiene copia del contenido (D8). El manifest remoto se guarda como fichero local propio, que no es copia del contenido descargado (D5). |
 | §6 Idiomas | Todo en inglés. Los mensajes pasan por `gettext` (D11). |
 | §7 y §8 Git | El código vive en `master`. Los parches por release van en una rama `jammy`/`noble`. El empaquetado Debian (`debian/`) **no** se incluye en `master`; vive en `debian/jammy` (fuera del alcance de este plan). |
 
@@ -40,6 +40,7 @@ Todos los valores se definen en un único módulo (`config`) y son sobrescribibl
 | Número máximo de fragmentos por manifest | 250 000 | No configurable | — |
 | Directorio de estado | `$XDG_STATE_HOME/chunkget/`; si no está definida, `~/.local/state/chunkget/` | Ruta | `--state-dir` |
 | Fichero manifest de salida | `./<name>.chunkget.manifest` | Ruta | `-o/--output` |
+| Fichero local del manifest descargado por URL (RF6) | `./<name>.chunkget.manifest` | Ruta | `--manifest-file` |
 | Fichero de destino de la descarga | `./<name>` (campo `name` del manifest) | Ruta | `-o/--output` |
 
 Rutas del sistema (RF1.4):
@@ -90,12 +91,12 @@ chunkget/                 repositorio
 | `i18n.py` | `gettext` (`_`, `ngettext`) con dominio `chunkget`. | RNF2 |
 | `events.py` | Dataclasses de eventos (`ChunkDone`, `PassStarted`, `GlobalCheckStarted`…) que el núcleo envía a un *listener* opcional. | RNF4 |
 | `hashing.py` | Algoritmos soportados, formato `alg:hex`, hash en streaming de ficheros y de flujos. | RF1.1, RF1.3, RF9, RF11 |
-| `manifest.py` | Modelo `Manifest`/`Chunk`, carga desde bytes, volcado a JSON, validación completa. | RF1.1, RF1.1.1, RF6, caso «manifest corrupto» |
+| `manifest.py` | Modelo `Manifest`/`Chunk`, carga desde bytes, volcado a JSON, validación completa y guardado como fichero local de un manifest recibido por URL. | RF1.1, RF1.1.1, RF6, caso «manifest corrupto» |
 | `manifest_builder.py` | Calcular en una sola lectura los hashes de fragmento y el global. | RF2, RF3 |
 | `http.py` | Abrir URLs http/https, pedir rangos, validar `206`/`Content-Range`, clasificar errores, leer un recurso pequeño en memoria, descarga simple con reanudación. | RF3, RF4, RF6, RF7, RF9, RF10 |
 | `storage.py` | Comprobar espacio, crear/preasignar el fichero final, escribir un fragmento en su posición, volcar a disco, releer para el hash global. | RF7, RF11, caso «sin espacio» |
 | `state.py` | Modelo del estado, `state_key`, carga/guardado atómico, bloqueo exclusivo. | RF8, RF9, caso «Ctrl-C» |
-| `downloader.py` | Flujo completo de `download`: preparar, pasadas, reintentos, hash global. | RF6–RF11 |
+| `downloader.py` | Flujo completo de `download`: obtener el manifest (ruta o URL, guardándolo en local si es URL), preparar, pasadas, reintentos, hash global. | RF6–RF11 |
 | `publisher.py` | Flujo de `make-manifest`: origen local o remoto, generación y escritura del manifest. | RF2–RF5 |
 
 ### 3.2 Reglas de dependencia (RNF4)
@@ -220,7 +221,13 @@ Al leer el fichero una vez se actualizan a la vez el hash del fragmento actual y
 | `4xx` restantes, fallo de certificado TLS, esquema no soportado | Fatal: código 6. |
 | `200` en lugar de `206`, total distinto, `Content-Encoding` | Fatal: código 11. |
 
-- **Manifest remoto [RF6]:** se lee a un `bytes` en memoria con tope de 64 MiB y se procesa con el mismo código que un manifest local. **No se crea fichero temporal** (constitución §5).
+- **Manifest remoto [RF6]:** cuando `MANIFEST` es una URL, el sistema lo descarga **a un fichero local** para usos posteriores. El procedimiento es:
+  1. Se lee a un `bytes` en memoria con tope de 64 MiB y se valida con el mismo código que un manifest local (4.4). Si no es válido, no se guarda nada.
+  2. Se escribe directamente en la ruta local, sin fichero intermedio: `--manifest-file` o, por defecto, `./<name>.chunkget.manifest`, donde `<name>` es el campo `name` del manifest ya validado.
+  3. Si la ruta ya existe: si su contenido es **idéntico** a los bytes recibidos, no se hace nada ni se pregunta (así relanzar una descarga reanudable con la misma URL no pide confirmación); si difiere, la CLI pregunta si se sobrescribe, con la misma regla que RF5 (`-y` responde sí; rechazo o ausencia de terminal → código 4).
+  4. La descarga continúa con el manifest ya validado en memoria, equivalente al fichero guardado.
+  5. Un error al escribir el fichero (permisos, disco lleno) → código 10.
+  Este fichero contiene solo el manifest, no el contenido del fichero descargado, por lo que cumple la constitución §5. Los usos posteriores son relanzar `download` pasando esa ruta local en lugar de la URL.
 - Las variables de entorno de proxy del sistema que `urllib` respeta se mantienen; no se implementa ninguna gestión propia de proxies (fuera de alcance).
 
 ### D6. Escritura sobre el fichero final y espacio [RF7, RF9, RF11, caso «sin espacio»]
@@ -334,12 +341,13 @@ Salida de éxito (stdout): `Manifest written: <ruta>`.
 
 ```
 chunkget download MANIFEST [-o OUTPUT] [--max-retries N] [--timeout SECONDS]
-                           [--state-dir DIR] [--restart] [-y]
+                           [--state-dir DIR] [--manifest-file PATH] [--restart] [-y]
 ```
 
 | Argumento | Significado | RF |
 |---|---|---|
-| `MANIFEST` | Ruta local **o** URL `http(s)` de un manifest. La URL se distingue por su esquema. | RF6, RF7 |
+| `MANIFEST` | Ruta local **o** URL `http(s)` de un manifest. La URL se distingue por su esquema. Si es una URL, el manifest se guarda como fichero local (D5). | RF6, RF7 |
+| `--manifest-file` | Solo con `MANIFEST` URL: ruta local donde se guarda el manifest descargado. Defecto: `./<name>.chunkget.manifest`. Es **error de uso** (código 2) si se indica con un `MANIFEST` que es una ruta local. | RF6 |
 | `-o, --output` | Ruta del fichero destino. Defecto: `./<name>`. | RF7 |
 | `--max-retries` | Pasadas de reintento de fragmentos fallidos. Defecto 5. | RF10 |
 | `--timeout` | Timeout de red. | RF10 |
@@ -350,6 +358,7 @@ chunkget download MANIFEST [-o OUTPUT] [--max-retries N] [--timeout SECONDS]
 La URL de descarga se toma **siempre** del campo `url` del manifest. No existe opción para cambiarla.
 
 Salida:
+- Manifest por URL [RF6] (stdout): `Manifest saved: <ruta>`, antes de empezar la descarga. Si el fichero ya existía con el mismo contenido, se imprime igualmente. Si existe con contenido distinto, se pregunta en stderr «overwrite?» antes de continuar.
 - Progreso (stderr), una línea por fragmento terminado; en terminal se reescribe la misma línea. Ejemplo: `Downloading image.iso: chunk 12/768 (1.6%), 48.0 MiB of 3.0 GiB`.
 - Cuando empieza una pasada de reintento: `Retry pass 2/5: 7 chunks pending`.
 - Éxito [RF11] (stdout): `Download completed: <ruta>` y, en stderr, `Global hash verified (sha256).`
@@ -364,13 +373,13 @@ Salida:
 | 1 | `UNEXPECTED` | Error interno no previsto. | RNF3 |
 | 2 | `USAGE` | Argumentos inválidos o valor de opción no soportado (el mensaje lista los válidos). | RF1.3 |
 | 3 | `SOURCE_ERROR` | El fichero de origen o el manifest no existe, no es legible o la URL da error (404, DNS, timeout, TLS…). | RF4, RF6 |
-| 4 | `USER_DECLINED` | El usuario rechaza una confirmación (sobrescribir) o no se puede preguntar. | RF5, D14 |
+| 4 | `USER_DECLINED` | El usuario rechaza una confirmación (sobrescribir el manifest de salida, el manifest descargado o el destino) o no se puede preguntar. | RF5, RF6, D14 |
 | 5 | `MANIFEST_INVALID` | Manifest corrupto, inválido o de versión no soportada. | RF1.1, caso «manifest corrupto» |
 | 6 | `NETWORK_ERROR` | Error fatal de red/HTTP al descargar (4xx no reintentable, certificado inválido). | RF7, RF9 |
 | 7 | `RETRIES_EXHAUSTED` | Quedan fragmentos sin descargar tras agotar los reintentos. | RF10 |
 | 8 | `GLOBAL_HASH_MISMATCH` | Fallo de la validación del hash global. | RF11 |
 | 9 | `NO_SPACE` | No hay espacio suficiente para el fichero. | caso «sin espacio» |
-| 10 | `FILESYSTEM_ERROR` | Error al leer/escribir el destino, el manifest o el estado (permisos, disco lleno). | RF5, RF7, RF8 |
+| 10 | `FILESYSTEM_ERROR` | Error al leer/escribir el destino, el manifest (incluido el descargado por URL) o el estado (permisos, disco lleno). | RF5, RF6, RF7, RF8 |
 | 11 | `SERVER_INCOMPATIBLE` | El servidor no admite rangos, el tamaño remoto no coincide con el manifest o aplica `Content-Encoding`. | RF7, RF9 |
 | 12 | `ALREADY_RUNNING` | Otra descarga usa el mismo destino y manifest. | caso «dos descargas» |
 | 13 | `STATE_INVALID` | Estado corrupto, de otra versión o inconsistente con el destino. | RF8 |
@@ -408,7 +417,7 @@ Todo cambio de código lleva su test. `pytest -q` debe pasar completo antes de d
 
 | Fichero de test | Cubre |
 |---|---|
-| `test_manifest.py` | RF1.1, RF1.1.1, RF6, invariantes 4.4, fichero vacío, caso «manifest corrupto» |
+| `test_manifest.py` | RF1.1, RF1.1.1, RF6 (guardado local: contenido idéntico, ruta existente igual o distinta, error de escritura), invariantes 4.4, fichero vacío, caso «manifest corrupto» |
 | `test_manifest_builder.py` | RF2, RF3, equivalencia con `hashlib` externo |
 | `test_publisher.py` | RF2, RF3, RF4, RF5 |
 | `test_http.py` | RF3, RF6, RF7, clasificación de errores (D5) |
@@ -436,7 +445,7 @@ Todo cambio de código lleva su test. `pytest -q` debe pasar completo antes de d
 | RF3 | D4, 7.3 punto 2, `http.py`, `publisher.py` |
 | RF4 | D5, código 3 de 7.5 |
 | RF5 | 7.3 punto 3, D3, D14, código 4 |
-| RF6 | D5 (lectura en memoria), 7.4 (`MANIFEST` ruta o URL) |
+| RF6 | D5 (descarga del manifest a fichero local), 7.4 (`MANIFEST` ruta o URL, `--manifest-file`, `Manifest saved`), secciones 2 y 7.5 (códigos 4 y 10) |
 | RF7 | D6, D14, 7.4 |
 | RF8 | Sección 5, D8, D14, `state.py` |
 | RF9 | D6, D7, D8, sección 5 |
@@ -467,4 +476,5 @@ Este plan resuelve las siguientes lagunas de `spec.md`. Si alguna no es la desea
 10. **Servidor sin soporte de rangos o con tamaño distinto** → código 11 antes de escribir; la spec lo incluía en una versión anterior, no en la actual.
 11. **Bloqueo de descargas simultáneas** con `flock` (D10).
 12. **YAML no se implementa**; RF1.1.1 queda cubierto solo con JSON (D1).
-13. **Subcomandos adicionales no previstos:** ninguno. La comprobación posterior de un fichero descargado (antigua spec 002) no forma parte de este MVP.
+13. **Guardado local del manifest por URL (RF6)**, que la spec no detalla: ruta por defecto `./<name>.chunkget.manifest`, opción nueva `--manifest-file`, se valida antes de guardar y, si la ruta ya existe con contenido idéntico, no se pregunta; si difiere, se pregunta antes de sobrescribir (D5).
+14. **Subcomandos adicionales no previstos:** ninguno. La comprobación posterior de un fichero descargado (antigua spec 002) no forma parte de este MVP.
