@@ -156,26 +156,26 @@ def _check_chunk_size(chunk_size):
         )
 
 
-def _check_hashes(document):
+def _check_hashes(manifest):
     """All hashes must be well formed and use the algorithm of global_hash."""
-    algorithm, _ = hashing.parse_hash(document["global_hash"])
-    for chunk in document["chunks"]:
-        chunk_algorithm, _ = hashing.parse_hash(chunk["hash"])
+    algorithm, _ = hashing.parse_hash(manifest.global_hash)
+    for chunk in manifest.chunks:
+        chunk_algorithm, _ = hashing.parse_hash(chunk.hash)
         if chunk_algorithm != algorithm:
             raise ManifestInvalidError(
                 "invalid manifest: chunk {id} uses {found} but the global "
                 "hash uses {expected}",
-                id=chunk["id"],
+                id=chunk.id,
                 found=chunk_algorithm,
                 expected=algorithm,
             )
 
 
-def _check_chunks(document):
+def _check_chunks(manifest):
     """Chunks must be consecutive, contiguous and cover exactly ``size``."""
-    size = document["size"]
-    chunk_size = document["chunk_size"]
-    chunks = document["chunks"]
+    size = manifest.size
+    chunk_size = manifest.chunk_size
+    chunks = manifest.chunks
     if size < 0:
         raise ManifestInvalidError(
             "invalid manifest: size {size} must not be negative", size=size
@@ -198,21 +198,21 @@ def _check_chunks(document):
         )
     position = 0
     for index, chunk in enumerate(chunks):
-        if chunk["id"] != index:
+        if chunk.id != index:
             raise ManifestInvalidError(
                 "invalid manifest: chunk at position {index} has id {id}",
                 index=index,
-                id=chunk["id"],
+                id=chunk.id,
             )
-        if chunk["start"] != position:
+        if chunk.start != position:
             raise ManifestInvalidError(
                 "invalid manifest: chunk {index} starts at {start} but "
                 "{expected} was expected (gap or overlap)",
                 index=index,
-                start=chunk["start"],
+                start=chunk.start,
                 expected=position,
             )
-        length = chunk["end"] - chunk["start"]
+        length = chunk.end - chunk.start
         is_last = index == len(chunks) - 1
         if length > chunk_size or length < 1 or (
             not is_last and length != chunk_size
@@ -223,7 +223,7 @@ def _check_chunks(document):
                 index=index,
                 length=length,
             )
-        position = chunk["end"]
+        position = chunk.end
     if position != size:
         raise ManifestInvalidError(
             "invalid manifest: chunks end at {end} but the size is {size}",
@@ -232,8 +232,22 @@ def _check_chunks(document):
         )
 
 
+def validate(manifest):
+    """Check the invariants on the values of a ``Manifest`` (plan 4.4).
+
+    Structure and types are checked by ``load_manifest`` before building
+    the object. Raises ``ManifestInvalidError`` on the first violation.
+    """
+    _check_version(manifest.protocol_version)
+    _check_name(manifest.name)
+    _check_url(manifest.url)
+    _check_chunk_size(manifest.chunk_size)
+    _check_hashes(manifest)
+    _check_chunks(manifest)
+
+
 def load_manifest(data):
-    """Parse manifest bytes, checking the structure and types of the fields."""
+    """Parse and fully validate manifest bytes."""
     try:
         document = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError) as error:
@@ -245,13 +259,7 @@ def load_manifest(data):
         _check_object(
             chunk, _CHUNK_TYPES, "chunk at position {}".format(position)
         )
-    _check_version(document["protocol_version"])
-    _check_name(document["name"])
-    _check_url(document["url"])
-    _check_chunk_size(document["chunk_size"])
-    _check_hashes(document)
-    _check_chunks(document)
-    return Manifest(
+    manifest = Manifest(
         protocol_version=document["protocol_version"],
         name=document["name"],
         url=document["url"],
@@ -260,6 +268,8 @@ def load_manifest(data):
         global_hash=document["global_hash"],
         chunks=tuple(Chunk(**chunk) for chunk in document["chunks"]),
     )
+    validate(manifest)
+    return manifest
 
 
 def load_manifest_file(path):

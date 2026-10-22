@@ -153,7 +153,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T19
   - Hecho cuando: tests comprueban: fichero vacío (0 fragmentos y hash global de la cadena vacía), fichero menor que el fragmento (1 fragmento), fichero múltiplo exacto del fragmento y último fragmento más corto.
 
-- [ ] **T21 — Construir el `Manifest` completo**
+- [x] **T21 — Construir el `Manifest` completo**
   - RF/RNF: RF2, RF1.2, RF1.3
   - Depende de: T20, T18, T05
   - Función que recibe ruta, URL, tamaño de fragmento y algoritmo, usa los valores por defecto si no se indican, informa del progreso al *listener* y devuelve un `Manifest` validado. `name` es el nombre base del fichero.

@@ -1,15 +1,19 @@
 """Compute the chunk list and the global hash of a local file."""
 
-from chunkget import config, hashing
-from chunkget.manifest import Chunk
+import os
+
+from chunkget import config, events, hashing
+from chunkget.manifest import PROTOCOL_VERSION, Chunk, Manifest, validate
 
 
-def compute_chunks(path, chunk_size, algorithm):
+def compute_chunks(path, chunk_size, algorithm, listener=None):
     """Read ``path`` once and return ``(chunks, global_hash)``.
 
     Hashes are formatted as ``algorithm:hex``. A single pass updates the
-    hash of the current chunk and the global hash at the same time.
+    hash of the current chunk and the global hash at the same time. If
+    ``listener`` is given it receives a ``ChunkDone`` event per chunk.
     """
+    total = -(-os.path.getsize(path) // chunk_size)
     global_hasher = hashing.Hasher(algorithm)
     chunks = []
     with open(path, "rb") as handle:
@@ -35,4 +39,34 @@ def compute_chunks(path, chunk_size, algorithm):
                 )
             )
             start += length
+            if listener is not None:
+                listener(
+                    events.ChunkDone(
+                        index=chunks[-1].id, total=total, bytes=length
+                    )
+                )
     return tuple(chunks), hashing.format_hash(algorithm, global_hasher.hexdigest())
+
+
+def build_manifest(
+    path, url, chunk_size=None, algorithm=None, listener=None
+):
+    """Build a validated ``Manifest`` for the local file ``path``."""
+    if chunk_size is None:
+        chunk_size = config.DEFAULT_CHUNK_SIZE
+    if algorithm is None:
+        algorithm = config.DEFAULT_ALGORITHM
+    config.validate_chunk_size(chunk_size)
+    hashing.validate_algorithm(algorithm)
+    chunks, global_hash = compute_chunks(path, chunk_size, algorithm, listener)
+    manifest = Manifest(
+        protocol_version=PROTOCOL_VERSION,
+        name=os.path.basename(path),
+        url=url,
+        size=chunks[-1].end if chunks else 0,
+        chunk_size=chunk_size,
+        global_hash=global_hash,
+        chunks=chunks,
+    )
+    validate(manifest)
+    return manifest

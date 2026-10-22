@@ -113,3 +113,80 @@ def test_file_of_exactly_one_chunk(tmp_path):
         write(tmp_path, sample_data(1000)), 1000, "sha256"
     )
     assert spans(chunks) == [(0, 0, 1000)]
+
+
+# --- build_manifest (T21) ---
+
+from chunkget import events
+from chunkget.errors import ManifestInvalidError, UsageError
+from chunkget.manifest import PROTOCOL_VERSION, Manifest, load_manifest
+
+URL = "http://127.0.0.1:8000/source.bin"
+
+
+def test_defaults_are_100_mib_and_sha256(tmp_path):
+    data = sample_data(2500)
+    manifest = manifest_builder.build_manifest(write(tmp_path, data), URL)
+    assert isinstance(manifest, Manifest)
+    assert manifest.chunk_size == 100 * 1024 * 1024
+    assert manifest.global_hash == "sha256:" + hashlib.sha256(data).hexdigest()
+    assert len(manifest.chunks) == 1
+
+
+def test_manifest_fields(tmp_path):
+    data = sample_data(2500)
+    manifest = manifest_builder.build_manifest(
+        write(tmp_path, data), URL, chunk_size=1000, algorithm="sha512"
+    )
+    assert manifest.protocol_version == PROTOCOL_VERSION
+    assert manifest.name == "source.bin"
+    assert manifest.url == URL
+    assert manifest.size == 2500
+    assert manifest.chunk_size == 1000
+    assert manifest.global_hash.startswith("sha512:")
+    assert len(manifest.chunks) == 3
+
+
+def test_manifest_passes_validation(tmp_path):
+    manifest = manifest_builder.build_manifest(
+        write(tmp_path, sample_data(2500)), URL, chunk_size=1000
+    )
+    assert load_manifest(manifest.to_json().encode("utf-8")) == manifest
+
+
+def test_empty_file_manifest_is_valid(tmp_path):
+    manifest = manifest_builder.build_manifest(write(tmp_path, b""), URL)
+    assert manifest.size == 0
+    assert manifest.chunks == ()
+
+
+def test_unsupported_algorithm_is_a_usage_error(tmp_path):
+    with pytest.raises(UsageError):
+        manifest_builder.build_manifest(
+            write(tmp_path, b"x"), URL, algorithm="md5"
+        )
+
+
+def test_invalid_chunk_size_is_a_usage_error(tmp_path):
+    with pytest.raises(UsageError):
+        manifest_builder.build_manifest(write(tmp_path, b"x"), URL, chunk_size=0)
+
+
+def test_invalid_url_is_rejected(tmp_path):
+    with pytest.raises(ManifestInvalidError):
+        manifest_builder.build_manifest(write(tmp_path, b"x"), "ftp://host/x")
+
+
+def test_listener_receives_one_event_per_chunk(tmp_path):
+    received = []
+    manifest_builder.build_manifest(
+        write(tmp_path, sample_data(2500)),
+        URL,
+        chunk_size=1000,
+        listener=received.append,
+    )
+    assert received == [
+        events.ChunkDone(index=0, total=3, bytes=1000),
+        events.ChunkDone(index=1, total=3, bytes=1000),
+        events.ChunkDone(index=2, total=3, bytes=500),
+    ]

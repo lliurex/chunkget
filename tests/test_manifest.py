@@ -466,3 +466,31 @@ def test_invalid_content_in_file_is_invalid(tmp_path):
     path.write_bytes(b"not json")
     with pytest.raises(ManifestInvalidError):
         load_manifest_file(path)
+
+
+# --- validate: value checks on an already built Manifest (T21) ---
+
+import dataclasses
+
+from chunkget.manifest import validate
+
+
+def test_validate_accepts_a_consistent_manifest():
+    validate(make_manifest())
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"protocol_version": 2},
+        {"name": "a/b"},
+        {"url": "ftp://host/x"},
+        {"chunk_size": 0},
+        {"global_hash": "sha256:abc"},
+        {"size": 151},
+        {"chunks": make_manifest().chunks[:1]},
+    ],
+)
+def test_validate_rejects_invalid_values(changes):
+    with pytest.raises(ManifestInvalidError):
+        validate(dataclasses.replace(make_manifest(), **changes))
