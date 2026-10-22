@@ -48,7 +48,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `events.py` con dataclasses para: inicio de pasada, fragmento terminado (índice, total, bytes), reintento, inicio de verificación global, fin.
   - Hecho cuando: `tests/test_events.py` crea cada evento y comprueba que son inmutables (`frozen`) y tienen los campos acordados.
 
-- [ ] **T06 — Test de arquitectura (núcleo sin CLI)**
+- [x] **T06 — Test de arquitectura (núcleo sin CLI)**
   - RF/RNF: RNF4
   - Depende de: T01
   - `tests/test_architecture.py` analiza con `ast` los ficheros de `chunkget/` y falla si alguno, salvo `cli.py` y `__main__.py`, importa `argparse`, usa `input`, `print`, `sys.exit` o importa `chunkget.cli`.
