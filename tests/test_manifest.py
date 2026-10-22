@@ -414,3 +414,55 @@ def test_chunk_count_limit_is_inclusive():
     with pytest.raises(ManifestInvalidError) as excinfo:
         load_manifest(dump(chunks_document(MAX_CHUNKS + 1, 1)))
     assert str(MAX_CHUNKS) in str(excinfo.value)
+
+
+# --- load_manifest_file (T18) ---
+
+import os
+
+from chunkget import config
+from chunkget.errors import SourceError
+from chunkget.manifest import load_manifest_file
+
+
+def test_round_trip_through_file(tmp_path):
+    path = tmp_path / "m.chunkget.manifest"
+    path.write_bytes(make_manifest().to_json().encode("utf-8"))
+    assert load_manifest_file(path) == make_manifest()
+
+
+def test_missing_file_is_a_source_error(tmp_path):
+    with pytest.raises(SourceError) as excinfo:
+        load_manifest_file(tmp_path / "missing")
+    assert excinfo.value.exit_code == ExitCode.SOURCE_ERROR
+
+
+def test_directory_is_a_source_error(tmp_path):
+    with pytest.raises(SourceError):
+        load_manifest_file(tmp_path)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_unreadable_file_is_a_source_error(tmp_path):
+    path = tmp_path / "m"
+    path.write_bytes(make_manifest().to_json().encode("utf-8"))
+    path.chmod(0)
+    with pytest.raises(SourceError):
+        load_manifest_file(path)
+
+
+def test_file_over_the_size_limit_is_invalid(tmp_path):
+    path = tmp_path / "big"
+    with open(path, "wb") as handle:
+        handle.truncate(config.MAX_MANIFEST_BYTES + 1)
+    with pytest.raises(ManifestInvalidError) as excinfo:
+        load_manifest_file(path)
+    assert excinfo.value.exit_code == ExitCode.MANIFEST_INVALID
+    assert str(config.MAX_MANIFEST_BYTES) in str(excinfo.value)
+
+
+def test_invalid_content_in_file_is_invalid(tmp_path):
+    path = tmp_path / "m"
+    path.write_bytes(b"not json")
+    with pytest.raises(ManifestInvalidError):
+        load_manifest_file(path)

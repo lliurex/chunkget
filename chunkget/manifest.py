@@ -6,7 +6,7 @@ import urllib.parse
 from typing import Tuple
 
 from chunkget import config, hashing
-from chunkget.errors import ManifestInvalidError
+from chunkget.errors import ManifestInvalidError, SourceError
 
 PROTOCOL_VERSION = 1
 MAX_NAME_BYTES = 255
@@ -260,3 +260,23 @@ def load_manifest(data):
         global_hash=document["global_hash"],
         chunks=tuple(Chunk(**chunk) for chunk in document["chunks"]),
     )
+
+
+def load_manifest_file(path):
+    """Load a manifest from a local file (at most ``MAX_MANIFEST_BYTES``)."""
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(config.MAX_MANIFEST_BYTES + 1)
+    except OSError as error:
+        raise SourceError(
+            "cannot read manifest {path}: {error}",
+            path=path,
+            error=error.strerror or error,
+        ) from None
+    if len(data) > config.MAX_MANIFEST_BYTES:
+        raise ManifestInvalidError(
+            "invalid manifest: {path} is larger than {maximum} bytes",
+            path=path,
+            maximum=config.MAX_MANIFEST_BYTES,
+        )
+    return load_manifest(data)

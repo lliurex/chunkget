@@ -132,7 +132,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Invariantes 7 y 8, y el límite de 250 000 fragmentos.
   - Hecho cuando: tests comprueban que se rechazan: `id` no consecutivo, hueco o solape, último `end` distinto de `size`, fragmento mayor que `chunk_size`, nº de fragmentos distinto de `ceil(size/chunk_size)` y más de 250 000. Se aceptan `size = 0` con `chunks = []` y un único fragmento menor que `chunk_size`.
 
-- [ ] **T18 — Carga desde fichero**
+- [x] **T18 — Carga desde fichero**
   - RF/RNF: RF1.1, RF4, RF6
   - Depende de: T15, T16, T17
   - `load_manifest_file(path)` con límite de 64 MiB (invariante 9).
