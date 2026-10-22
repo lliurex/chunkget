@@ -259,7 +259,8 @@ def test_chunk_size_out_of_range_is_rejected(chunk_size):
 
 @pytest.mark.parametrize("chunk_size", [1, 100, GIB])
 def test_chunk_size_limits_are_accepted(chunk_size):
-    assert load_with(chunk_size=chunk_size).chunk_size == chunk_size
+    manifest = load_manifest(dump(chunks_document(150, chunk_size)))
+    assert manifest.chunk_size == chunk_size
 
 
 def sha(name, text=b"x"):
@@ -314,3 +315,102 @@ def test_malformed_hex_is_rejected_in_any_hash_field(bad):
         load_with_chunk_hashes(HASH_A, bad)
     with pytest.raises(ManifestInvalidError):
         load_with_chunk_hashes(HASH_A, HASH_B, global_hash=bad)
+
+
+# --- load_manifest: chunk list (T17) ---
+
+
+def chunks_document(size, chunk_size):
+    """A consistent document for ``size`` bytes cut in ``chunk_size`` pieces."""
+    data = copy.deepcopy(valid_data())
+    data["size"] = size
+    data["chunk_size"] = chunk_size
+    data["chunks"] = [
+        {
+            "id": index,
+            "start": start,
+            "end": min(start + chunk_size, size),
+            "hash": HASH_A,
+        }
+        for index, start in enumerate(range(0, size, chunk_size))
+    ]
+    return data
+
+
+def test_empty_file_without_chunks_is_accepted():
+    manifest = load_manifest(dump(chunks_document(0, 100)))
+    assert manifest.size == 0
+    assert manifest.chunks == ()
+
+
+@pytest.mark.parametrize(
+    "size, chunk_size, count",
+    [(50, 100, 1), (100, 100, 1), (150, 100, 2), (300, 100, 3), (301, 100, 4)],
+)
+def test_consistent_chunk_lists_are_accepted(size, chunk_size, count):
+    manifest = load_manifest(dump(chunks_document(size, chunk_size)))
+    assert len(manifest.chunks) == count
+    assert manifest.chunks[-1].end == size
+
+
+def broken(function, size=150, chunk_size=100):
+    data = chunks_document(size, chunk_size)
+    function(data)
+    return dump(data)
+
+
+INVALID_CHUNK_LISTS = {
+    "negative size": broken(lambda d: d.update(size=-1, chunks=[])),
+    "size zero with chunks": broken(lambda d: d.update(size=0)),
+    "id not starting at zero": broken(
+        lambda d: [c.update(id=c["id"] + 1) for c in d["chunks"]]
+    ),
+    "id skipped": broken(lambda d: d["chunks"][1].update(id=2)),
+    "id repeated": broken(lambda d: d["chunks"][1].update(id=0)),
+    "first chunk not at zero": broken(lambda d: d["chunks"][0].update(start=1)),
+    "gap between chunks": broken(lambda d: d["chunks"][1].update(start=101)),
+    "overlap between chunks": broken(lambda d: d["chunks"][1].update(start=99)),
+    "last end before size": broken(lambda d: d["chunks"][1].update(end=149)),
+    "last end after size": broken(lambda d: d["chunks"][1].update(end=151)),
+    "chunk larger than chunk_size": broken(
+        lambda d: (
+            d["chunks"][0].update(end=101),
+            d["chunks"][1].update(start=101),
+        )
+    ),
+    "empty chunk": broken(
+        lambda d: (
+            d["chunks"][0].update(end=0),
+            d["chunks"][1].update(start=0, end=150),
+        )
+    ),
+    "too few chunks": broken(
+        lambda d: d["chunks"].pop(), size=250
+    ),
+    "too many chunks": broken(
+        lambda d: d["chunks"].append(
+            {"id": 2, "start": 150, "end": 150, "hash": HASH_A}
+        )
+    ),
+    "no chunks for non-empty file": broken(lambda d: d.update(chunks=[])),
+}
+
+
+@pytest.mark.parametrize(
+    "document", INVALID_CHUNK_LISTS.values(), ids=INVALID_CHUNK_LISTS.keys()
+)
+def test_inconsistent_chunk_lists_are_rejected(document):
+    with pytest.raises(ManifestInvalidError) as excinfo:
+        load_manifest(document)
+    assert excinfo.value.exit_code == ExitCode.MANIFEST_INVALID
+
+
+def test_chunk_count_limit_is_inclusive():
+    from chunkget.config import MAX_CHUNKS
+
+    assert len(load_manifest(dump(chunks_document(MAX_CHUNKS, 1))).chunks) == (
+        MAX_CHUNKS
+    )
+    with pytest.raises(ManifestInvalidError) as excinfo:
+        load_manifest(dump(chunks_document(MAX_CHUNKS + 1, 1)))
+    assert str(MAX_CHUNKS) in str(excinfo.value)

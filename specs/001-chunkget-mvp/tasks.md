@@ -126,7 +126,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Invariantes 5 y 6.
   - Hecho cuando: tests comprueban que se rechazan `chunk_size` 0 y mayor que 1 GiB, hashes con algoritmos mezclados o no soportados, hex de longitud incorrecta y hex con mayúsculas.
 
-- [ ] **T17 — Validación de la lista de fragmentos**
+- [x] **T17 — Validación de la lista de fragmentos**
   - RF/RNF: RF1.1, caso «manifest corrupto», caso «fichero vacío o menor que un fragmento»
   - Depende de: T14
   - Invariantes 7 y 8, y el límite de 250 000 fragmentos.

@@ -171,6 +171,67 @@ def _check_hashes(document):
             )
 
 
+def _check_chunks(document):
+    """Chunks must be consecutive, contiguous and cover exactly ``size``."""
+    size = document["size"]
+    chunk_size = document["chunk_size"]
+    chunks = document["chunks"]
+    if size < 0:
+        raise ManifestInvalidError(
+            "invalid manifest: size {size} must not be negative", size=size
+        )
+    if len(chunks) > config.MAX_CHUNKS:
+        raise ManifestInvalidError(
+            "invalid manifest: it has {count} chunks, the maximum is {maximum}",
+            count=len(chunks),
+            maximum=config.MAX_CHUNKS,
+        )
+    expected_count = -(-size // chunk_size)
+    if len(chunks) != expected_count:
+        raise ManifestInvalidError(
+            "invalid manifest: {size} bytes in chunks of up to {chunk_size} "
+            "need {expected} chunks but it has {count}",
+            size=size,
+            chunk_size=chunk_size,
+            expected=expected_count,
+            count=len(chunks),
+        )
+    position = 0
+    for index, chunk in enumerate(chunks):
+        if chunk["id"] != index:
+            raise ManifestInvalidError(
+                "invalid manifest: chunk at position {index} has id {id}",
+                index=index,
+                id=chunk["id"],
+            )
+        if chunk["start"] != position:
+            raise ManifestInvalidError(
+                "invalid manifest: chunk {index} starts at {start} but "
+                "{expected} was expected (gap or overlap)",
+                index=index,
+                start=chunk["start"],
+                expected=position,
+            )
+        length = chunk["end"] - chunk["start"]
+        is_last = index == len(chunks) - 1
+        if length > chunk_size or length < 1 or (
+            not is_last and length != chunk_size
+        ):
+            raise ManifestInvalidError(
+                "invalid manifest: chunk {index} has an invalid length "
+                "{length}",
+                index=index,
+                length=length,
+            )
+        position = chunk["end"]
+    if position != size:
+        raise ManifestInvalidError(
+            "invalid manifest: chunks end at {end} but the size is {size}",
+            end=position,
+            size=size,
+        )
+
+
 def load_manifest(data):
     """Parse manifest bytes, checking the structure and types of the fields."""
     try:
@@ -189,6 +250,7 @@ def load_manifest(data):
     _check_url(document["url"])
     _check_chunk_size(document["chunk_size"])
     _check_hashes(document)
+    _check_chunks(document)
     return Manifest(
         protocol_version=document["protocol_version"],
         name=document["name"],
