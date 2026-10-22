@@ -3,6 +3,7 @@
 import hashlib
 import re
 
+from chunkget import config
 from chunkget.errors import ManifestInvalidError, UsageError
 
 SUPPORTED_ALGORITHMS = ("sha256", "sha384", "sha512", "sha3_256", "sha3_512")
@@ -49,3 +50,29 @@ def parse_hash(text):
             length=hex_length(algorithm),
         )
     return algorithm, hexdigest
+
+
+class Hasher:
+    """Incremental hasher for one of the supported algorithms."""
+
+    def __init__(self, algorithm):
+        self.algorithm = validate_algorithm(algorithm)
+        self._hash = hashlib.new(algorithm)
+
+    def update(self, data):
+        self._hash.update(data)
+
+    def hexdigest(self):
+        return self._hash.hexdigest()
+
+
+def hash_file(path, algorithm):
+    """Return the hex digest of a file, reading it in buffer-sized blocks."""
+    hasher = Hasher(algorithm)
+    with open(path, "rb") as handle:
+        while True:
+            block = handle.read(config.BUFFER_SIZE)
+            if not block:
+                break
+            hasher.update(block)
+    return hasher.hexdigest()

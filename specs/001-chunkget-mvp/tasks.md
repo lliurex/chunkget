@@ -92,7 +92,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `hashing.py`: lista soportada (`sha256`, `sha384`, `sha512`, `sha3_256`, `sha3_512`), `format_hash`, `parse_hash` y validación de longitud del hex por algoritmo.
   - Hecho cuando: tests comprueban que `md5` y `sha1` se rechazan con `UsageError` que lista los algoritmos soportados, y que `parse_hash` rechaza mayúsculas, longitud incorrecta y prefijo desconocido.
 
-- [ ] **T12 — Hash incremental y de fichero**
+- [x] **T12 — Hash incremental y de fichero**
   - RF/RNF: RF1.1, RF11, RNF2
   - Depende de: T11
   - Objeto hasher incremental y `hash_file(path)` con búfer de 1 MiB.
