@@ -18,19 +18,19 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 0 — Esqueleto y utilidades base
 
-- [ ] **T01 — Esqueleto del paquete y test de humo**
+- [x] **T01 — Esqueleto del paquete y test de humo**
   - RF/RNF: RNF1
   - Depende de: —
   - Crea `conftest.py` (vacío), `pyproject.toml` (solo `[build-system]`), `setup.cfg` (metadatos y `console_scripts` `chunkget = chunkget.cli:main`), `chunkget/__init__.py` (versión), `chunkget/__main__.py` y `tests/test_smoke.py`.
   - Hecho cuando: `pytest -q` termina con código 0 y ejecuta `test_smoke.py`, que importa `chunkget` y comprueba que existe `chunkget.__version__`.
 
-- [ ] **T02 — `ExitCode`**
+- [x] **T02 — `ExitCode`**
   - RF/RNF: RNF3
   - Depende de: T01
   - `errors.py` con la enumeración de la tabla 7.5 (0, 1, 2…13, 130, 143).
   - Hecho cuando: `tests/test_errors.py` comprueba que los nombres y valores coinciden con la tabla 7.5, que no hay valores repetidos y que `ExitCode.OK == 0`.
 
-- [ ] **T03 — `i18n.py`**
+- [x] **T03 — `i18n.py`**
   - RF/RNF: RNF2
   - Depende de: T01
   - Funciones `_` y `ngettext` con dominio `chunkget`, `fallback=True`, y una función para inyectar un objeto de traducción (para tests).

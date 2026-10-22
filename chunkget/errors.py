@@ -1,0 +1,22 @@
+"""Process exit codes."""
+
+import enum
+
+
+class ExitCode(enum.IntEnum):
+    OK = 0
+    UNEXPECTED = 1
+    USAGE = 2
+    SOURCE_ERROR = 3
+    USER_DECLINED = 4
+    MANIFEST_INVALID = 5
+    NETWORK_ERROR = 6
+    RETRIES_EXHAUSTED = 7
+    GLOBAL_HASH_MISMATCH = 8
+    NO_SPACE = 9
+    FILESYSTEM_ERROR = 10
+    SERVER_INCOMPATIBLE = 11
+    ALREADY_RUNNING = 12
+    STATE_INVALID = 13
+    INTERRUPTED = 130
+    TERMINATED = 143
