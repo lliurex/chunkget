@@ -236,3 +236,81 @@ def test_invalid_urls_are_rejected(url):
 )
 def test_valid_urls_are_accepted(url):
     assert load_with(url=url).url == url
+
+
+# --- load_manifest: chunk_size and hashes (T16) ---
+
+GIB = 1024 ** 3
+
+
+def load_with_chunk_hashes(*hashes, global_hash=GLOBAL):
+    data = copy.deepcopy(valid_data())
+    data["global_hash"] = global_hash
+    for chunk, value in zip(data["chunks"], hashes):
+        chunk["hash"] = value
+    return load_manifest(dump(data))
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1, GIB + 1])
+def test_chunk_size_out_of_range_is_rejected(chunk_size):
+    message = message_for(chunk_size=chunk_size)
+    assert str(GIB) in message
+
+
+@pytest.mark.parametrize("chunk_size", [1, 100, GIB])
+def test_chunk_size_limits_are_accepted(chunk_size):
+    assert load_with(chunk_size=chunk_size).chunk_size == chunk_size
+
+
+def sha(name, text=b"x"):
+    return name + ":" + hashlib.new(name, text).hexdigest()
+
+
+import hashlib
+
+
+@pytest.mark.parametrize("name", ["sha256", "sha384", "sha512", "sha3_256", "sha3_512"])
+def test_consistent_algorithm_is_accepted(name):
+    manifest = load_with_chunk_hashes(
+        sha(name, b"a"), sha(name, b"b"), global_hash=sha(name)
+    )
+    assert manifest.global_hash == sha(name)
+
+
+def test_mixed_algorithms_are_rejected():
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(
+            sha("sha512"), sha("sha512"), global_hash=sha("sha256")
+        )
+
+
+def test_mixed_algorithms_between_chunks_are_rejected():
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(sha("sha256"), sha("sha512"))
+
+
+@pytest.mark.parametrize("algorithm", ["md5", "sha1", "crc32"])
+def test_unsupported_algorithm_is_rejected(algorithm):
+    value = algorithm + ":" + "0" * 32
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(value, value, global_hash=value)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "sha256:" + "a" * 63,
+        "sha256:" + "a" * 65,
+        "sha256:",
+        "sha256:" + "A" * 64,
+        "sha256:" + "g" * 64,
+        "a" * 64,
+    ],
+)
+def test_malformed_hex_is_rejected_in_any_hash_field(bad):
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(bad, HASH_B)
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(HASH_A, bad)
+    with pytest.raises(ManifestInvalidError):
+        load_with_chunk_hashes(HASH_A, HASH_B, global_hash=bad)

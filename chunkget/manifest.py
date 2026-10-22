@@ -5,6 +5,7 @@ import json
 import urllib.parse
 from typing import Tuple
 
+from chunkget import config, hashing
 from chunkget.errors import ManifestInvalidError
 
 PROTOCOL_VERSION = 1
@@ -145,6 +146,31 @@ def _check_url(url):
         )
 
 
+def _check_chunk_size(chunk_size):
+    if not 1 <= chunk_size <= config.MAX_CHUNK_SIZE:
+        raise ManifestInvalidError(
+            "invalid manifest: chunk size {value} must be between 1 and "
+            "{maximum}",
+            value=chunk_size,
+            maximum=config.MAX_CHUNK_SIZE,
+        )
+
+
+def _check_hashes(document):
+    """All hashes must be well formed and use the algorithm of global_hash."""
+    algorithm, _ = hashing.parse_hash(document["global_hash"])
+    for chunk in document["chunks"]:
+        chunk_algorithm, _ = hashing.parse_hash(chunk["hash"])
+        if chunk_algorithm != algorithm:
+            raise ManifestInvalidError(
+                "invalid manifest: chunk {id} uses {found} but the global "
+                "hash uses {expected}",
+                id=chunk["id"],
+                found=chunk_algorithm,
+                expected=algorithm,
+            )
+
+
 def load_manifest(data):
     """Parse manifest bytes, checking the structure and types of the fields."""
     try:
@@ -161,6 +187,8 @@ def load_manifest(data):
     _check_version(document["protocol_version"])
     _check_name(document["name"])
     _check_url(document["url"])
+    _check_chunk_size(document["chunk_size"])
+    _check_hashes(document)
     return Manifest(
         protocol_version=document["protocol_version"],
         name=document["name"],

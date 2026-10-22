@@ -120,7 +120,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Invariantes 2, 3 y 4.
   - Hecho cuando: tests comprueban que se rechazan: versión mayor y menor (con mensajes distintos), nombre vacío, `.`, `..`, con `/`, `\`, NUL, de más de 255 bytes, y URL sin host o con esquema distinto de `http`/`https`.
 
-- [ ] **T16 — Validación de `chunk_size` y hashes**
+- [x] **T16 — Validación de `chunk_size` y hashes**
   - RF/RNF: RF1.1, caso «manifest corrupto»
   - Depende de: T14, T11
   - Invariantes 5 y 6.
