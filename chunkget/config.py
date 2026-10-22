@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from chunkget.errors import UsageError
+from chunkget.i18n import _
 
 KIB = 1024
 MIB = 1024 * KIB
@@ -28,9 +29,12 @@ def parse_size(text):
     match = _SIZE_RE.fullmatch(text)
     if match is None:
         raise UsageError(
-            "invalid size {value!r}: expected a non-negative integer with an "
-            "optional suffix K, M or G (powers of 1024), e.g. 4096, 4K, 100M, 1G",
-            value=text,
+            _(
+                "invalid size {value!r}: expected a non-negative integer with an "
+                "optional suffix K, M or G (powers of 1024), e.g. 4096, 4K, 100M, 1G"
+            ).format(
+                value=text,
+            )
         )
     number, suffix = match.groups()
     return int(number) * _SIZE_SUFFIXES.get(suffix, 1)
@@ -39,11 +43,14 @@ def parse_size(text):
 def _validate_range(name, value, low, high):
     if not low <= value <= high:
         raise UsageError(
-            "invalid {name} {value}: must be between {low} and {high}",
-            name=name,
-            value=value,
-            low=low,
-            high=high,
+            _(
+                "invalid {name} {value}: must be between {low} and {high}"
+            ).format(
+                name=name,
+                value=value,
+                low=low,
+                high=high,
+            )
         )
     return value
 

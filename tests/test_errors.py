@@ -41,6 +41,7 @@ import gettext
 import pytest
 
 from chunkget import errors, i18n
+from chunkget.i18n import _
 
 EXCEPTION_CODES = [
     (errors.UsageError, ExitCode.USAGE),
@@ -61,15 +62,15 @@ EXCEPTION_CODES = [
 ]
 
 
-class UpperTranslations(gettext.NullTranslations):
+class PrefixTranslations(gettext.NullTranslations):
     def gettext(self, message):
-        return message.upper()
+        return "T: " + message
 
 
 @pytest.fixture
-def upper_translation():
+def prefix_translation():
     previous = i18n.get_translation()
-    i18n.set_translation(UpperTranslations())
+    i18n.set_translation(PrefixTranslations())
     yield
     i18n.set_translation(previous)
 
@@ -81,23 +82,19 @@ def test_exception_exposes_exit_code(exc_class, code):
 
 
 @pytest.mark.parametrize("exc_class, code", EXCEPTION_CODES)
-def test_exception_message_goes_through_translation(
-    exc_class, code, upper_translation
+def test_exception_keeps_the_message_it_receives(exc_class, code):
+    assert str(exc_class("boom")) == "boom"
+
+
+@pytest.mark.parametrize("exc_class, code", EXCEPTION_CODES)
+def test_message_marked_with_gettext_is_translated(
+    exc_class, code, prefix_translation
 ):
-    assert str(exc_class("boom")) == "BOOM"
+    assert str(exc_class(_("boom"))) == "T: boom"
 
 
-def test_message_is_formatted_after_translation():
-    class PrefixTranslations(gettext.NullTranslations):
-        def gettext(self, message):
-            return "T: " + message
-
-    previous = i18n.get_translation()
-    i18n.set_translation(PrefixTranslations())
-    try:
-        exc = errors.NoSpaceError("need {needed} bytes", needed=5)
-    finally:
-        i18n.set_translation(previous)
+def test_message_is_formatted_after_translation(prefix_translation):
+    exc = errors.NoSpaceError(_("need {needed} bytes").format(needed=5))
     assert str(exc) == "T: need 5 bytes"
 
 
@@ -108,3 +105,19 @@ def test_terminated_exit_code_can_be_selected():
 
 def test_base_error_defaults_to_unexpected():
     assert errors.ChunkgetError("x").exit_code == ExitCode.UNEXPECTED
+
+
+def test_library_errors_are_translated(prefix_translation):
+    from chunkget import config, hashing
+    from chunkget.manifest import load_manifest
+
+    for call in (
+        lambda: config.parse_size("bad"),
+        lambda: config.validate_timeout(0),
+        lambda: hashing.validate_algorithm("md5"),
+        lambda: hashing.parse_hash("md5:00"),
+        lambda: load_manifest(b"not json"),
+    ):
+        with pytest.raises(errors.ChunkgetError) as excinfo:
+            call()
+        assert str(excinfo.value).startswith("T: ")

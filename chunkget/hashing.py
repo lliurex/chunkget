@@ -5,6 +5,7 @@ import re
 
 from chunkget import config
 from chunkget.errors import ManifestInvalidError, UsageError
+from chunkget.i18n import _
 
 SUPPORTED_ALGORITHMS = ("sha256", "sha384", "sha512", "sha3_256", "sha3_512")
 
@@ -15,9 +16,12 @@ def validate_algorithm(name):
     """Return ``name`` if supported, else raise UsageError listing valid ones."""
     if name not in SUPPORTED_ALGORITHMS:
         raise UsageError(
-            "unsupported hash algorithm {name!r}: use one of {supported}",
-            name=name,
-            supported=", ".join(SUPPORTED_ALGORITHMS),
+            _(
+                "unsupported hash algorithm {name!r}: use one of {supported}"
+            ).format(
+                name=name,
+                supported=", ".join(SUPPORTED_ALGORITHMS),
+            )
         )
     return name
 
@@ -36,18 +40,24 @@ def parse_hash(text):
     algorithm, separator, hexdigest = text.partition(":")
     if not separator or algorithm not in SUPPORTED_ALGORITHMS:
         raise ManifestInvalidError(
-            "invalid hash {value!r}: expected <algorithm>:<hex> with algorithm "
-            "one of {supported}",
-            value=text,
-            supported=", ".join(SUPPORTED_ALGORITHMS),
+            _(
+                "invalid hash {value!r}: expected <algorithm>:<hex> with algorithm "
+                "one of {supported}"
+            ).format(
+                value=text,
+                supported=", ".join(SUPPORTED_ALGORITHMS),
+            )
         )
     if len(hexdigest) != hex_length(algorithm) or not _HEX_RE.fullmatch(hexdigest):
         raise ManifestInvalidError(
-            "invalid {algorithm} hash {value!r}: expected {length} lowercase "
-            "hexadecimal digits",
-            algorithm=algorithm,
-            value=hexdigest,
-            length=hex_length(algorithm),
+            _(
+                "invalid {algorithm} hash {value!r}: expected {length} lowercase "
+                "hexadecimal digits"
+            ).format(
+                algorithm=algorithm,
+                value=hexdigest,
+                length=hex_length(algorithm),
+            )
         )
     return algorithm, hexdigest
 

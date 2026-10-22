@@ -2,8 +2,6 @@
 
 import enum
 
-from chunkget.i18n import _
-
 
 class ExitCode(enum.IntEnum):
     OK = 0
@@ -27,17 +25,11 @@ class ExitCode(enum.IntEnum):
 class ChunkgetError(Exception):
     """Base class for expected errors.
 
-    The message is translated at construction time; keyword arguments
-    are interpolated into the translated text with ``str.format``.
+    The message must be passed already translated: mark the literal with
+    ``_()`` at the call site and interpolate with ``str.format`` after it.
     """
 
     exit_code = ExitCode.UNEXPECTED
-
-    def __init__(self, message, **params):
-        text = _(message)
-        if params:
-            text = text.format(**params)
-        super().__init__(text)
 
 
 class UsageError(ChunkgetError):
@@ -101,7 +93,7 @@ class InterruptedByUser(ChunkgetError):
 
     exit_code = ExitCode.INTERRUPTED
 
-    def __init__(self, message, exit_code=None, **params):
-        super().__init__(message, **params)
+    def __init__(self, message, exit_code=None):
+        super().__init__(message)
         if exit_code is not None:
             self.exit_code = exit_code

@@ -39,8 +39,8 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 - [x] **T04 — Jerarquía de excepciones**
   - RF/RNF: RNF2, RNF3
   - Depende de: T02, T03
-  - `ChunkgetError` (con `exit_code` y mensaje traducido) y una subclase por cada código de 7.5: `UsageError`, `SourceError`, `UserDeclinedError`, `ManifestInvalidError`, `NetworkError`, `RetriesExhaustedError`, `GlobalHashMismatchError`, `NoSpaceError`, `FilesystemError`, `ServerIncompatibleError`, `AlreadyRunningError`, `StateInvalidError`, `InterruptedByUser`. Más `OutputExistsError` y `DestinationExistsError`.
-  - Hecho cuando: `tests/test_errors.py` comprueba que cada subclase expone el `ExitCode` de 7.5, que es subclase de `ChunkgetError`, y que el mensaje pasa por la traducción inyectada.
+  - `ChunkgetError` (con `exit_code`; recibe el mensaje ya traducido: cada literal se marca con `_()` en el punto de la llamada, `ChunkgetError(_("..."))`, y se interpola después con `.format(...)`, para que `xgettext` lo extraiga sin opciones especiales) y una subclase por cada código de 7.5: `UsageError`, `SourceError`, `UserDeclinedError`, `ManifestInvalidError`, `NetworkError`, `RetriesExhaustedError`, `GlobalHashMismatchError`, `NoSpaceError`, `FilesystemError`, `ServerIncompatibleError`, `AlreadyRunningError`, `StateInvalidError`, `InterruptedByUser`. Más `OutputExistsError` y `DestinationExistsError`.
+  - Hecho cuando: `tests/test_errors.py` comprueba que cada subclase expone el `ExitCode` de 7.5, que es subclase de `ChunkgetError`, y que el mensaje recibido se conserva tal cual y, cuando el literal está marcado con `_()`, pasa por la traducción inyectada. `tests/test_architecture.py` comprueba con `ast` que toda excepción del paquete se construye con `_("literal")` como mensaje.
 
 - [x] **T05 — Eventos de progreso**
   - RF/RNF: RNF4

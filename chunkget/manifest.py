@@ -7,6 +7,7 @@ from typing import Tuple
 
 from chunkget import config, hashing
 from chunkget.errors import ManifestInvalidError, SourceError
+from chunkget.i18n import _
 
 PROTOCOL_VERSION = 1
 MAX_NAME_BYTES = 255
@@ -71,44 +72,60 @@ def _check_object(value, fields, what):
     """Require a dict with exactly ``fields`` and values of the given types."""
     if not isinstance(value, dict):
         raise ManifestInvalidError(
-            "invalid manifest: {what} must be a JSON object", what=what
+            _(
+                "invalid manifest: {what} must be a JSON object"
+            ).format(
+                what=what,
+            )
         )
-    expected = [key for key, _ in fields]
+    expected = [key for key, _type in fields]
     if set(value) != set(expected):
         missing = [key for key in expected if key not in value]
         extra = sorted(set(value) - set(expected))
         raise ManifestInvalidError(
-            "invalid manifest: {what} has missing keys {missing} and "
-            "unexpected keys {extra}",
-            what=what,
-            missing=missing,
-            extra=extra,
+            _(
+                "invalid manifest: {what} has missing keys {missing} and "
+                "unexpected keys {extra}"
+            ).format(
+                what=what,
+                missing=missing,
+                extra=extra,
+            )
         )
     for key, expected_type in fields:
         item = value[key]
         # bool is a subclass of int but is never a valid number here.
         if not isinstance(item, expected_type) or isinstance(item, bool):
             raise ManifestInvalidError(
-                "invalid manifest: key {key!r} of {what} has the wrong type",
-                key=key,
-                what=what,
+                _(
+                    "invalid manifest: key {key!r} of {what} has the wrong type"
+                ).format(
+                    key=key,
+                    what=what,
+                )
             )
 
 
 def _check_version(version):
     if version > PROTOCOL_VERSION:
         raise ManifestInvalidError(
-            "unsupported manifest version {version}: this program supports "
-            "version {supported}",
-            version=version,
-            supported=PROTOCOL_VERSION,
+            _(
+                "unsupported manifest version {version}: this program supports "
+                "version {supported}"
+            ).format(
+                version=version,
+                supported=PROTOCOL_VERSION,
+            )
         )
     if version < PROTOCOL_VERSION:
         raise ManifestInvalidError(
-            "obsolete manifest version {version}: this program supports "
-            "version {supported}",
-            version=version,
-            supported=PROTOCOL_VERSION,
+            _(
+                "obsolete manifest version {version}: this program supports "
+                "version {supported}"
+            ).format(
+                version=version,
+                supported=PROTOCOL_VERSION,
+            )
         )
 
 
@@ -128,7 +145,11 @@ def _check_name(name):
         or any(char in name for char in "/\\\0")
     ):
         raise ManifestInvalidError(
-            "invalid manifest: {name!r} is not a valid file name", name=name
+            _(
+                "invalid manifest: {name!r} is not a valid file name"
+            ).format(
+                name=name,
+            )
         )
 
 
@@ -141,33 +162,42 @@ def _check_url(url):
         parts = None
     if parts is None or parts.scheme not in ("http", "https") or not host:
         raise ManifestInvalidError(
-            "invalid manifest: {url!r} is not a valid http or https URL",
-            url=url,
+            _(
+                "invalid manifest: {url!r} is not a valid http or https URL"
+            ).format(
+                url=url,
+            )
         )
 
 
 def _check_chunk_size(chunk_size):
     if not 1 <= chunk_size <= config.MAX_CHUNK_SIZE:
         raise ManifestInvalidError(
-            "invalid manifest: chunk size {value} must be between 1 and "
-            "{maximum}",
-            value=chunk_size,
-            maximum=config.MAX_CHUNK_SIZE,
+            _(
+                "invalid manifest: chunk size {value} must be between 1 and "
+                "{maximum}"
+            ).format(
+                value=chunk_size,
+                maximum=config.MAX_CHUNK_SIZE,
+            )
         )
 
 
 def _check_hashes(manifest):
     """All hashes must be well formed and use the algorithm of global_hash."""
-    algorithm, _ = hashing.parse_hash(manifest.global_hash)
+    algorithm, _digest = hashing.parse_hash(manifest.global_hash)
     for chunk in manifest.chunks:
-        chunk_algorithm, _ = hashing.parse_hash(chunk.hash)
+        chunk_algorithm, _digest = hashing.parse_hash(chunk.hash)
         if chunk_algorithm != algorithm:
             raise ManifestInvalidError(
-                "invalid manifest: chunk {id} uses {found} but the global "
-                "hash uses {expected}",
-                id=chunk.id,
-                found=chunk_algorithm,
-                expected=algorithm,
+                _(
+                    "invalid manifest: chunk {id} uses {found} but the global "
+                    "hash uses {expected}"
+                ).format(
+                    id=chunk.id,
+                    found=chunk_algorithm,
+                    expected=algorithm,
+                )
             )
 
 
@@ -178,39 +208,55 @@ def _check_chunks(manifest):
     chunks = manifest.chunks
     if size < 0:
         raise ManifestInvalidError(
-            "invalid manifest: size {size} must not be negative", size=size
+            _(
+                "invalid manifest: size {size} must not be negative"
+            ).format(
+                size=size,
+            )
         )
     if len(chunks) > config.MAX_CHUNKS:
         raise ManifestInvalidError(
-            "invalid manifest: it has {count} chunks, the maximum is {maximum}",
-            count=len(chunks),
-            maximum=config.MAX_CHUNKS,
+            _(
+                "invalid manifest: it has {count} chunks, the maximum is {maximum}"
+            ).format(
+                count=len(chunks),
+                maximum=config.MAX_CHUNKS,
+            )
         )
     expected_count = -(-size // chunk_size)
     if len(chunks) != expected_count:
         raise ManifestInvalidError(
-            "invalid manifest: {size} bytes in chunks of up to {chunk_size} "
-            "need {expected} chunks but it has {count}",
-            size=size,
-            chunk_size=chunk_size,
-            expected=expected_count,
-            count=len(chunks),
+            _(
+                "invalid manifest: {size} bytes in chunks of up to {chunk_size} "
+                "need {expected} chunks but it has {count}"
+            ).format(
+                size=size,
+                chunk_size=chunk_size,
+                expected=expected_count,
+                count=len(chunks),
+            )
         )
     position = 0
     for index, chunk in enumerate(chunks):
         if chunk.id != index:
             raise ManifestInvalidError(
-                "invalid manifest: chunk at position {index} has id {id}",
-                index=index,
-                id=chunk.id,
+                _(
+                    "invalid manifest: chunk at position {index} has id {id}"
+                ).format(
+                    index=index,
+                    id=chunk.id,
+                )
             )
         if chunk.start != position:
             raise ManifestInvalidError(
-                "invalid manifest: chunk {index} starts at {start} but "
-                "{expected} was expected (gap or overlap)",
-                index=index,
-                start=chunk.start,
-                expected=position,
+                _(
+                    "invalid manifest: chunk {index} starts at {start} but "
+                    "{expected} was expected (gap or overlap)"
+                ).format(
+                    index=index,
+                    start=chunk.start,
+                    expected=position,
+                )
             )
         length = chunk.end - chunk.start
         is_last = index == len(chunks) - 1
@@ -218,17 +264,23 @@ def _check_chunks(manifest):
             not is_last and length != chunk_size
         ):
             raise ManifestInvalidError(
-                "invalid manifest: chunk {index} has an invalid length "
-                "{length}",
-                index=index,
-                length=length,
+                _(
+                    "invalid manifest: chunk {index} has an invalid length "
+                    "{length}"
+                ).format(
+                    index=index,
+                    length=length,
+                )
             )
         position = chunk.end
     if position != size:
         raise ManifestInvalidError(
-            "invalid manifest: chunks end at {end} but the size is {size}",
-            end=position,
-            size=size,
+            _(
+                "invalid manifest: chunks end at {end} but the size is {size}"
+            ).format(
+                end=position,
+                size=size,
+            )
         )
 
 
@@ -252,7 +304,11 @@ def load_manifest(data):
         document = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError) as error:
         raise ManifestInvalidError(
-            "invalid manifest: it is not valid JSON ({error})", error=error
+            _(
+                "invalid manifest: it is not valid JSON ({error})"
+            ).format(
+                error=error,
+            )
         ) from None
     _check_object(document, _TOP_LEVEL_TYPES, "the manifest")
     for position, chunk in enumerate(document["chunks"]):
@@ -279,14 +335,20 @@ def load_manifest_file(path):
             data = handle.read(config.MAX_MANIFEST_BYTES + 1)
     except OSError as error:
         raise SourceError(
-            "cannot read manifest {path}: {error}",
-            path=path,
-            error=error.strerror or error,
+            _(
+                "cannot read manifest {path}: {error}"
+            ).format(
+                path=path,
+                error=error.strerror or error,
+            )
         ) from None
     if len(data) > config.MAX_MANIFEST_BYTES:
         raise ManifestInvalidError(
-            "invalid manifest: {path} is larger than {maximum} bytes",
-            path=path,
-            maximum=config.MAX_MANIFEST_BYTES,
+            _(
+                "invalid manifest: {path} is larger than {maximum} bytes"
+            ).format(
+                path=path,
+                maximum=config.MAX_MANIFEST_BYTES,
+            )
         )
     return load_manifest(data)

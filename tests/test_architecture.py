@@ -91,3 +91,56 @@ def test_detector_flags_each_forbidden_construct():
 def test_detector_accepts_clean_code():
     source = "import os\nfrom chunkget.errors import ExitCode\nos.getcwd()\n"
     assert find_violations(source) == []
+
+
+def find_unmarked_error_messages(source):
+    """Errors must be raised with ``_("literal")`` so xgettext finds them."""
+    from chunkget import errors
+
+    error_names = {
+        name
+        for name, value in vars(errors).items()
+        if isinstance(value, type) and issubclass(value, errors.ChunkgetError)
+    }
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in error_names
+        ):
+            continue
+        first = node.args[0] if node.args else None
+        # ``_("...")`` or ``_("...").format(...)``
+        if isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute):
+            first = first.func.value
+        marked = (
+            isinstance(first, ast.Call)
+            and isinstance(first.func, ast.Name)
+            and first.func.id == "_"
+            and len(first.args) == 1
+            and isinstance(first.args[0], ast.Constant)
+            and isinstance(first.args[0].value, str)
+        )
+        if not marked:
+            found.append("%s at line %d" % (node.func.id, node.lineno))
+    return found
+
+
+def test_error_messages_are_marked_for_translation():
+    found = {
+        path.name: find_unmarked_error_messages(path.read_text(encoding="utf-8"))
+        for path in sorted(PACKAGE_DIR.glob("*.py"))
+        if path.name != "errors.py"
+    }
+    assert {name: v for name, v in found.items() if v} == {}
+
+
+def test_unmarked_error_message_detector():
+    assert find_unmarked_error_messages('UsageError("x")')
+    assert find_unmarked_error_messages('UsageError(_("x" + y))')
+    assert find_unmarked_error_messages('UsageError(msg)')
+    assert not find_unmarked_error_messages('UsageError(_("x"))')
+    assert not find_unmarked_error_messages(
+        'SourceError(_("x {a}").format(a=1))'
+    )
