@@ -43,3 +43,29 @@ def test_parse_size_invalid_reports_accepted_format(text):
     message = str(excinfo.value)
     assert "K, M or G" in message
     assert "100M" in message
+
+
+GIB = 1024 * MIB
+
+RANGES = [
+    (config.validate_chunk_size, 1, GIB),
+    (config.validate_max_retries, 0, 100),
+    (config.validate_timeout, 1, 3600),
+]
+
+
+@pytest.mark.parametrize("validator, low, high", RANGES)
+def test_validators_accept_inclusive_limits(validator, low, high):
+    assert validator(low) == low
+    assert validator(high) == high
+    assert validator((low + high) // 2) == (low + high) // 2
+
+
+@pytest.mark.parametrize("validator, low, high", RANGES)
+def test_validators_reject_out_of_range_with_valid_range(validator, low, high):
+    for value in (low - 1, high + 1):
+        with pytest.raises(UsageError) as excinfo:
+            validator(value)
+        message = str(excinfo.value)
+        assert str(low) in message
+        assert str(high) in message

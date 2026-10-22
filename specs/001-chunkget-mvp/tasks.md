@@ -70,7 +70,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Convierte `"4096"`, `"4K"`, `"100M"`, `"1G"` (potencias de 1024) en bytes; rechaza vacío, negativos, sufijos desconocidos y decimales.
   - Hecho cuando: tests parametrizados comprueban los valores válidos y que cada entrada inválida lanza `UsageError` cuyo mensaje incluye el formato admitido.
 
-- [ ] **T09 — Validadores de opciones numéricas**
+- [x] **T09 — Validadores de opciones numéricas**
   - RF/RNF: RF1.3
   - Depende de: T08
   - Validan `chunk_size` (1 B – 1 GiB), `max_retries` (0–100) y `timeout` (1–3600).
