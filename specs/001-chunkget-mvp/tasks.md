@@ -86,7 +86,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 2 — Hashing
 
-- [ ] **T11 — Registro de algoritmos y formato `alg:hex`**
+- [x] **T11 — Registro de algoritmos y formato `alg:hex`**
   - RF/RNF: RF1.1, RF1.3
   - Depende de: T04
   - `hashing.py`: lista soportada (`sha256`, `sha384`, `sha512`, `sha3_256`, `sha3_512`), `format_hash`, `parse_hash` y validación de longitud del hex por algoritmo.
