@@ -142,7 +142,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 4 — Generación del manifest desde un fichero
 
-- [ ] **T19 — Cálculo de fragmentos y hash global en una pasada**
+- [x] **T19 — Cálculo de fragmentos y hash global en una pasada**
   - RF/RNF: RF2, RF1.1
   - Depende de: T12
   - `manifest_builder.py`: lee el fichero una vez y devuelve la lista de fragmentos y el hash global.
