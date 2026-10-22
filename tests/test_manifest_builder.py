@@ -64,3 +64,52 @@ def test_file_is_opened_and_read_only_once(tmp_path, monkeypatch):
     monkeypatch.setattr(manifest_builder, "open", counting_open, raising=False)
     manifest_builder.compute_chunks(path, 1000, "sha256")
     assert len(opened) == 1
+
+
+# --- Edge cases (T20) ---
+
+
+def spans(chunks):
+    return [(c.id, c.start, c.end) for c in chunks]
+
+
+@pytest.mark.parametrize("algorithm", ALGORITHMS)
+def test_empty_file_has_no_chunks_and_hash_of_empty_string(tmp_path, algorithm):
+    path = write(tmp_path, b"")
+    chunks, global_hash = manifest_builder.compute_chunks(path, 1000, algorithm)
+    assert chunks == ()
+    assert global_hash == algorithm + ":" + hashlib.new(algorithm, b"").hexdigest()
+
+
+def test_file_smaller_than_chunk_has_one_chunk(tmp_path):
+    data = sample_data(10)
+    chunks, global_hash = manifest_builder.compute_chunks(
+        write(tmp_path, data), 1000, "sha256"
+    )
+    assert spans(chunks) == [(0, 0, 10)]
+    assert chunks[0].hash == global_hash == "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def test_file_that_is_an_exact_multiple_has_no_empty_last_chunk(tmp_path):
+    data = sample_data(3000)
+    chunks, _ = manifest_builder.compute_chunks(
+        write(tmp_path, data), 1000, "sha256"
+    )
+    assert spans(chunks) == [(0, 0, 1000), (1, 1000, 2000), (2, 2000, 3000)]
+    assert chunks[2].hash == "sha256:" + hashlib.sha256(data[2000:]).hexdigest()
+
+
+def test_last_chunk_is_shorter(tmp_path):
+    data = sample_data(2001)
+    chunks, _ = manifest_builder.compute_chunks(
+        write(tmp_path, data), 1000, "sha256"
+    )
+    assert spans(chunks) == [(0, 0, 1000), (1, 1000, 2000), (2, 2000, 2001)]
+    assert chunks[2].hash == "sha256:" + hashlib.sha256(data[2000:]).hexdigest()
+
+
+def test_file_of_exactly_one_chunk(tmp_path):
+    chunks, _ = manifest_builder.compute_chunks(
+        write(tmp_path, sample_data(1000)), 1000, "sha256"
+    )
+    assert spans(chunks) == [(0, 0, 1000)]

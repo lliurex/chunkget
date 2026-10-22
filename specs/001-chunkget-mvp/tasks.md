@@ -148,7 +148,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `manifest_builder.py`: lee el fichero una vez y devuelve la lista de fragmentos y el hash global.
   - Hecho cuando: un test con un fichero de N bytes y fragmento F comprueba que hay `ceil(N/F)` hashes que coinciden con los calculados con `hashlib` por separado, y que el hash global coincide con el de `hashlib` sobre todo el fichero.
 
-- [ ] **T20 — Casos límite del cálculo**
+- [x] **T20 — Casos límite del cálculo**
   - RF/RNF: RF2, caso «fichero vacío o menor que un fragmento»
   - Depende de: T19
   - Hecho cuando: tests comprueban: fichero vacío (0 fragmentos y hash global de la cadena vacía), fichero menor que el fragmento (1 fragmento), fichero múltiplo exacto del fragmento y último fragmento más corto.
