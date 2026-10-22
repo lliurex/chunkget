@@ -1,6 +1,8 @@
 """Default values (plan section 2) and option parsing."""
 
+import os
 import re
+from pathlib import Path
 
 from chunkget.errors import UsageError
 
@@ -58,3 +60,22 @@ def validate_max_retries(value):
 def validate_timeout(value):
     """Check a network timeout in seconds."""
     return _validate_range("timeout", value, 1, 3600)
+
+
+def default_state_dir():
+    """``$XDG_STATE_HOME/chunkget`` or ``~/.local/state/chunkget``."""
+    base = os.environ.get("XDG_STATE_HOME", "")
+    # The XDG spec says relative values must be ignored.
+    if not base or not os.path.isabs(base):
+        base = os.path.join(Path.home(), ".local", "state")
+    return Path(base) / "chunkget"
+
+
+def default_manifest_path(name):
+    """Default output manifest: ``./<name>.chunkget.manifest``."""
+    return Path(name + ".chunkget.manifest")
+
+
+def default_destination(name):
+    """Default download destination: ``./<name>``."""
+    return Path(name)

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from chunkget import config
@@ -69,3 +71,36 @@ def test_validators_reject_out_of_range_with_valid_range(validator, low, high):
         message = str(excinfo.value)
         assert str(low) in message
         assert str(high) in message
+
+
+def test_state_dir_uses_xdg_state_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    assert config.default_state_dir() == tmp_path / "state" / "chunkget"
+
+
+def test_state_dir_without_xdg_state_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert config.default_state_dir() == (
+        tmp_path / ".local" / "state" / "chunkget"
+    )
+
+
+def test_state_dir_ignores_empty_or_relative_xdg_state_home(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    expected = tmp_path / ".local" / "state" / "chunkget"
+    for value in ("", "relative/dir"):
+        monkeypatch.setenv("XDG_STATE_HOME", value)
+        assert config.default_state_dir() == expected
+
+
+def test_default_manifest_path():
+    assert config.default_manifest_path("image.iso") == Path(
+        "image.iso.chunkget.manifest"
+    )
+
+
+def test_default_destination():
+    assert config.default_destination("image.iso") == Path("image.iso")

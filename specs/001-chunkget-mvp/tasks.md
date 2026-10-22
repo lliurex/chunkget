@@ -76,7 +76,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Validan `chunk_size` (1 B – 1 GiB), `max_retries` (0–100) y `timeout` (1–3600).
   - Hecho cuando: tests comprueban los límites inclusivos y que un valor fuera de rango lanza `UsageError` con el rango válido en el mensaje.
 
-- [ ] **T10 — Rutas por defecto**
+- [x] **T10 — Rutas por defecto**
   - RF/RNF: RF1.4
   - Depende de: T07
   - Funciones para el directorio de estado (`$XDG_STATE_HOME/chunkget` o `~/.local/state/chunkget`), el manifest de salida por defecto (`./<name>.chunkget.manifest`) y el destino por defecto (`./<name>`).
