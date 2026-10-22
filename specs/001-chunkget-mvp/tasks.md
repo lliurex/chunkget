@@ -58,7 +58,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 1 — Configuración
 
-- [ ] **T07 — Valores por defecto**
+- [x] **T07 — Valores por defecto**
   - RF/RNF: RF1.2, RF1.4
   - Depende de: T01
   - `config.py` con las constantes de la sección 2 del plan (100 MiB, `sha256`, 5 reintentos, 30 s, 1 MiB de búfer, 64 MiB de manifest, 250 000 fragmentos, 3 fallos de red consecutivos).
