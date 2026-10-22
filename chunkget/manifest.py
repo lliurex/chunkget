@@ -2,11 +2,13 @@
 
 import dataclasses
 import json
+import urllib.parse
 from typing import Tuple
 
 from chunkget.errors import ManifestInvalidError
 
 PROTOCOL_VERSION = 1
+MAX_NAME_BYTES = 255
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,6 +94,57 @@ def _check_object(value, fields, what):
             )
 
 
+def _check_version(version):
+    if version > PROTOCOL_VERSION:
+        raise ManifestInvalidError(
+            "unsupported manifest version {version}: this program supports "
+            "version {supported}",
+            version=version,
+            supported=PROTOCOL_VERSION,
+        )
+    if version < PROTOCOL_VERSION:
+        raise ManifestInvalidError(
+            "obsolete manifest version {version}: this program supports "
+            "version {supported}",
+            version=version,
+            supported=PROTOCOL_VERSION,
+        )
+
+
+def _check_name(name):
+    """The name must be a plain file name, so it cannot escape the directory."""
+    try:
+        too_long = len(name.encode("utf-8")) > MAX_NAME_BYTES
+    except UnicodeEncodeError:
+        too_long = False
+        valid_text = False
+    else:
+        valid_text = True
+    if (
+        not valid_text
+        or too_long
+        or name in ("", ".", "..")
+        or any(char in name for char in "/\\\0")
+    ):
+        raise ManifestInvalidError(
+            "invalid manifest: {name!r} is not a valid file name", name=name
+        )
+
+
+def _check_url(url):
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        host = None
+        parts = None
+    if parts is None or parts.scheme not in ("http", "https") or not host:
+        raise ManifestInvalidError(
+            "invalid manifest: {url!r} is not a valid http or https URL",
+            url=url,
+        )
+
+
 def load_manifest(data):
     """Parse manifest bytes, checking the structure and types of the fields."""
     try:
@@ -105,6 +158,9 @@ def load_manifest(data):
         _check_object(
             chunk, _CHUNK_TYPES, "chunk at position {}".format(position)
         )
+    _check_version(document["protocol_version"])
+    _check_name(document["name"])
+    _check_url(document["url"])
     return Manifest(
         protocol_version=document["protocol_version"],
         name=document["name"],

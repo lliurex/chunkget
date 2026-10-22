@@ -156,3 +156,83 @@ def test_load_rejects_invalid_structure_or_types(document):
     with pytest.raises(ManifestInvalidError) as excinfo:
         load_manifest(document)
     assert excinfo.value.exit_code == ExitCode.MANIFEST_INVALID
+
+
+# --- load_manifest: version, name and URL (T15) ---
+
+
+def load_with(**changes):
+    data = copy.deepcopy(valid_data())
+    data.update(changes)
+    return load_manifest(dump(data))
+
+
+def message_for(**changes):
+    with pytest.raises(ManifestInvalidError) as excinfo:
+        load_with(**changes)
+    assert excinfo.value.exit_code == ExitCode.MANIFEST_INVALID
+    return str(excinfo.value)
+
+
+def test_newer_and_older_versions_have_different_messages():
+    newer = message_for(protocol_version=PROTOCOL_VERSION + 1)
+    older = message_for(protocol_version=PROTOCOL_VERSION - 1)
+    assert "unsupported" in newer
+    assert "obsolete" in older
+    assert newer != older
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        ".",
+        "..",
+        "a/b",
+        "/etc/passwd",
+        "../x",
+        "a\\b",
+        "a\0b",
+        "x" * 256,
+        "ñ" * 128,  # 256 bytes in UTF-8
+        "\ud800",  # not encodable in UTF-8
+    ],
+)
+def test_invalid_names_are_rejected(name):
+    message_for(name=name)
+
+
+@pytest.mark.parametrize("name", ["a", "...", "x" * 255, "ñ" * 127 + "a", "a b.iso"])
+def test_valid_names_are_accepted(name):
+    assert load_with(name=name).name == name
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "image.iso",
+        "ftp://example.com/image.iso",
+        "file:///etc/passwd",
+        "http://",
+        "https:///path",
+        "http:///image.iso",
+        "//example.com/image.iso",
+        "http://[::1/image.iso",
+        "javascript:alert(1)",
+    ],
+)
+def test_invalid_urls_are_rejected(url):
+    message_for(url=url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/image.iso",
+        "https://example.com:8443/a/b.iso?x=1",
+        "HTTP://Example.com/x",
+    ],
+)
+def test_valid_urls_are_accepted(url):
+    assert load_with(url=url).url == url

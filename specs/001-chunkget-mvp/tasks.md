@@ -114,7 +114,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `load_manifest(data)` valida JSON, que sea un objeto con exactamente las claves de 4.1 y 4.2 y los tipos correctos (invariante 1).
   - Hecho cuando: tests parametrizados comprueban que JSON inválido, clave faltante, clave sobrante y tipo incorrecto lanzan `ManifestInvalidError` (código 5), y que un manifest válido se carga.
 
-- [ ] **T15 — Validación de versión, nombre y URL**
+- [x] **T15 — Validación de versión, nombre y URL**
   - RF/RNF: RF1.1, caso «manifest corrupto»
   - Depende de: T14
   - Invariantes 2, 3 y 4.
