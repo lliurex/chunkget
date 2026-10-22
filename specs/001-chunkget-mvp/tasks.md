@@ -64,7 +64,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `config.py` con las constantes de la sección 2 del plan (100 MiB, `sha256`, 5 reintentos, 30 s, 1 MiB de búfer, 64 MiB de manifest, 250 000 fragmentos, 3 fallos de red consecutivos).
   - Hecho cuando: `tests/test_config.py` comprueba cada constante contra la tabla de la sección 2.
 
-- [ ] **T08 — `parse_size`**
+- [x] **T08 — `parse_size`**
   - RF/RNF: RF1.3
   - Depende de: T04, T07
   - Convierte `"4096"`, `"4K"`, `"100M"`, `"1G"` (potencias de 1024) en bytes; rechaza vacío, negativos, sufijos desconocidos y decimales.
