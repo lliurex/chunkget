@@ -36,13 +36,13 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Funciones `_` y `ngettext` con dominio `chunkget`, `fallback=True`, y una función para inyectar un objeto de traducción (para tests).
   - Hecho cuando: `tests/test_i18n.py` comprueba que, sin catálogo, `_("x")` devuelve `"x"`, y que con una traducción inyectada que transforma el texto, `_` y `ngettext` devuelven el texto transformado.
 
-- [ ] **T04 — Jerarquía de excepciones**
+- [x] **T04 — Jerarquía de excepciones**
   - RF/RNF: RNF2, RNF3
   - Depende de: T02, T03
   - `ChunkgetError` (con `exit_code` y mensaje traducido) y una subclase por cada código de 7.5: `UsageError`, `SourceError`, `UserDeclinedError`, `ManifestInvalidError`, `NetworkError`, `RetriesExhaustedError`, `GlobalHashMismatchError`, `NoSpaceError`, `FilesystemError`, `ServerIncompatibleError`, `AlreadyRunningError`, `StateInvalidError`, `InterruptedByUser`. Más `OutputExistsError` y `DestinationExistsError`.
   - Hecho cuando: `tests/test_errors.py` comprueba que cada subclase expone el `ExitCode` de 7.5, que es subclase de `ChunkgetError`, y que el mensaje pasa por la traducción inyectada.
 
-- [ ] **T05 — Eventos de progreso**
+- [x] **T05 — Eventos de progreso**
   - RF/RNF: RNF4
   - Depende de: T01
   - `events.py` con dataclasses para: inicio de pasada, fragmento terminado (índice, total, bytes), reintento, inicio de verificación global, fin.
