@@ -102,13 +102,13 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 3 — Modelo del manifest
 
-- [ ] **T13 — Modelo y serialización**
+- [x] **T13 — Modelo y serialización**
   - RF/RNF: RF1.1, RF1.1.1
   - Depende de: T11
   - `manifest.py`: dataclasses `Manifest`/`Chunk` y `to_json` con claves en el orden de 4.1, indentación y UTF-8.
   - Hecho cuando: `tests/test_manifest.py` comprueba que la salida es JSON válido con exactamente las claves de 4.1 y 4.2, en ese orden, y que contiene saltos de línea e indentación (legible).
 
-- [ ] **T14 — Carga desde bytes: estructura y tipos**
+- [x] **T14 — Carga desde bytes: estructura y tipos**
   - RF/RNF: RF1.1, caso «manifest corrupto»
   - Depende de: T13, T04
   - `load_manifest(data)` valida JSON, que sea un objeto con exactamente las claves de 4.1 y 4.2 y los tipos correctos (invariante 1).
