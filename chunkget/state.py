@@ -4,6 +4,9 @@ import dataclasses
 import json
 import os
 
+from chunkget.errors import StateInvalidError
+from chunkget.i18n import _
+
 STATE_VERSION = 1
 
 # States of a chunk, one character each in ``chunk_states``.
@@ -40,6 +43,79 @@ def new_state(manifest, destination):
     )
 
 
-def from_json(data):
-    """Load a state from its JSON bytes."""
-    return State(**json.loads(data.decode("utf-8")))
+_FIELDS = (
+    ("state_version", int),
+    ("manifest_id", str),
+    ("destination", str),
+    ("chunk_states", str),
+    ("status", str),
+)
+_CHUNK_STATES = (PENDING, CORRECT, FAILED)
+_STATUSES = (IN_PROGRESS, COMPLETED, GLOBAL_CHECK_FAILED)
+
+
+def from_json(data, manifest=None):
+    """Load and validate a state from its JSON bytes.
+
+    If ``manifest`` is given, the state must also belong to it and have one
+    character per chunk. Raises ``StateInvalidError`` otherwise.
+    """
+    try:
+        document = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
+        raise StateInvalidError(
+            _("invalid state file: it is not valid JSON ({error})").format(error=error)
+        ) from None
+    if not isinstance(document, dict) or set(document) != {k for k, _t in _FIELDS}:
+        raise StateInvalidError(
+            _("invalid state file: it must be an object with the keys {keys}").format(
+                keys=", ".join(key for key, _t in _FIELDS)
+            )
+        )
+    for key, expected_type in _FIELDS:
+        value = document[key]
+        # bool is a subclass of int but is never a valid number here.
+        if not isinstance(value, expected_type) or isinstance(value, bool):
+            raise StateInvalidError(
+                _("invalid state file: key {key!r} has the wrong type").format(key=key)
+            )
+    loaded = State(**document)
+    _validate(loaded, manifest)
+    return loaded
+
+
+def _validate(loaded, manifest):
+    if loaded.state_version != STATE_VERSION:
+        raise StateInvalidError(
+            _(
+                "unsupported state file version {version}: this program "
+                "supports version {supported}"
+            ).format(version=loaded.state_version, supported=STATE_VERSION)
+        )
+    if loaded.status not in _STATUSES:
+        raise StateInvalidError(
+            _("invalid state file: unknown status {status!r}").format(
+                status=loaded.status
+            )
+        )
+    if not os.path.isabs(loaded.destination):
+        raise StateInvalidError(
+            _("invalid state file: destination {path!r} is not an absolute path").format(
+                path=loaded.destination
+            )
+        )
+    if any(char not in _CHUNK_STATES for char in loaded.chunk_states):
+        raise StateInvalidError(
+            _("invalid state file: chunk states may only contain P, C or F")
+        )
+    if manifest is None:
+        return
+    if loaded.manifest_id != manifest.global_hash:
+        raise StateInvalidError(_("invalid state file: it belongs to a different manifest"))
+    if len(loaded.chunk_states) != len(manifest.chunks):
+        raise StateInvalidError(
+            _(
+                "invalid state file: it has {found} chunk states but the "
+                "manifest has {expected} chunks"
+            ).format(found=len(loaded.chunk_states), expected=len(manifest.chunks))
+        )

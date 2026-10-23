@@ -77,3 +77,132 @@ def test_round_trip_keeps_the_data(tmp_path):
 def test_round_trip_with_non_ascii_destination(tmp_path):
     new = state.new_state(make_manifest(tmp_path), tmp_path / "ñandú.iso")
     assert state.from_json(new.to_json().encode("utf-8")) == new
+
+
+# --- Validation (T37) ---
+
+from chunkget.errors import ExitCode, StateInvalidError
+
+
+def document(tmp_path, **changes):
+    """JSON of a valid state for a 3-chunk manifest, with ``changes`` applied."""
+    data = json.loads(
+        state.new_state(make_manifest(tmp_path), tmp_path / "image.iso").to_json()
+    )
+    for key, value in changes.items():
+        if value is MISSING:
+            del data[key]
+        else:
+            data[key] = value
+    return json.dumps(data).encode("utf-8")
+
+
+MISSING = object()
+
+
+def load(tmp_path, **changes):
+    return state.from_json(document(tmp_path, **changes), make_manifest(tmp_path))
+
+
+def test_a_valid_state_is_loaded(tmp_path):
+    loaded = load(tmp_path)
+    assert loaded.chunk_states == "PPP"
+
+
+@pytest.mark.parametrize("chunk_states", ["PCF", "CCC", "FFF"])
+@pytest.mark.parametrize(
+    "status", [state.IN_PROGRESS, state.COMPLETED, state.GLOBAL_CHECK_FAILED]
+)
+def test_every_valid_chunk_state_and_status_is_accepted(
+    tmp_path, chunk_states, status
+):
+    loaded = load(tmp_path, chunk_states=chunk_states, status=status)
+    assert (loaded.chunk_states, loaded.status) == (chunk_states, status)
+
+
+def assert_invalid(function):
+    with pytest.raises(StateInvalidError) as excinfo:
+        function()
+    assert excinfo.value.exit_code == ExitCode.STATE_INVALID
+    return str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"", b"not json", b'{"state_version": ', b"\xff\xfe{}", b"[]", b"null", b"3"],
+    ids=["empty", "not json", "truncated", "bad utf-8", "list", "null", "number"],
+)
+def test_invalid_json_is_rejected(tmp_path, data):
+    assert_invalid(lambda: state.from_json(data, make_manifest(tmp_path)))
+
+
+def test_invalid_json_is_rejected_without_a_manifest():
+    assert_invalid(lambda: state.from_json(b"not json"))
+
+
+@pytest.mark.parametrize("key", ["state_version", "manifest_id", "destination",
+                                 "chunk_states", "status"])
+def test_missing_keys_are_rejected(tmp_path, key):
+    assert_invalid(lambda: load(tmp_path, **{key: MISSING}))
+
+
+def test_extra_keys_are_rejected(tmp_path):
+    assert_invalid(lambda: load(tmp_path, extra=1))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"state_version": "1"},
+        {"state_version": True},
+        {"state_version": 1.0},
+        {"manifest_id": 5},
+        {"destination": None},
+        {"chunk_states": ["P", "P", "P"]},
+        {"status": 1},
+    ],
+)
+def test_wrong_types_are_rejected(tmp_path, changes):
+    assert_invalid(lambda: load(tmp_path, **changes))
+
+
+@pytest.mark.parametrize("version", [0, 2, 99, -1])
+def test_unknown_version_is_rejected(tmp_path, version):
+    message = assert_invalid(lambda: load(tmp_path, state_version=version))
+    assert str(version) in message
+
+
+@pytest.mark.parametrize("chunk_states", ["", "PP", "PPPP", "PPPPPP"])
+def test_length_different_from_the_number_of_chunks_is_rejected(
+    tmp_path, chunk_states
+):
+    message = assert_invalid(lambda: load(tmp_path, chunk_states=chunk_states))
+    assert "3" in message
+
+
+def test_length_is_not_checked_without_a_manifest(tmp_path):
+    loaded = state.from_json(document(tmp_path, chunk_states="PP"))
+    assert loaded.chunk_states == "PP"
+
+
+@pytest.mark.parametrize("chunk_states", ["PXP", "pcf", "P P", "P\nP", "1PP", "PPé"])
+def test_characters_outside_pcf_are_rejected(tmp_path, chunk_states):
+    assert_invalid(lambda: load(tmp_path, chunk_states=chunk_states))
+
+
+def test_characters_outside_pcf_are_rejected_without_a_manifest(tmp_path):
+    assert_invalid(lambda: state.from_json(document(tmp_path, chunk_states="PXP")))
+
+
+@pytest.mark.parametrize("status", ["", "done", "COMPLETED", "in-progress"])
+def test_unknown_status_is_rejected(tmp_path, status):
+    assert_invalid(lambda: load(tmp_path, status=status))
+
+
+@pytest.mark.parametrize("destination", ["", "image.iso", "./image.iso"])
+def test_destination_must_be_an_absolute_path(tmp_path, destination):
+    assert_invalid(lambda: load(tmp_path, destination=destination))
+
+
+def test_state_of_another_manifest_is_rejected(tmp_path):
+    assert_invalid(lambda: load(tmp_path, manifest_id="sha256:" + "0" * 64))

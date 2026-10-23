@@ -261,7 +261,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `state.py`: dataclass con `state_version`, `manifest_id`, `destination`, `chunk_states` (`P`/`C`/`F`) y `status`; `new_state(manifest, destination)` con todos los fragmentos en `P`; `to_json`/`from_json`.
   - Hecho cuando: tests comprueban que el estado nuevo tiene un carácter por fragmento, todos `P`, `status = in_progress`, que contiene la ruta de destino y que la ida y vuelta conserva los datos.
 
-- [ ] **T37 — Validación del estado**
+- [x] **T37 — Validación del estado**
   - RF/RNF: RF8
   - Depende de: T36
   - Hecho cuando: tests comprueban que `StateInvalidError` (13) se lanza con: JSON inválido, `state_version` desconocida, longitud de `chunk_states` distinta del nº de fragmentos, carácter fuera de `P`/`C`/`F` y `status` desconocido.
