@@ -1,5 +1,6 @@
 """Local HTTP server with ``Range`` support for tests (127.0.0.1 only)."""
 
+import collections
 import dataclasses
 import re
 import threading
@@ -25,11 +26,22 @@ class _Handler(BaseHTTPRequestHandler):
         self.server.requests.append(
             RequestRecord(self.path, dict(self.headers.items()))
         )
+        statuses = self.server.statuses.get(self.path)
+        if statuses:
+            self._send(statuses.popleft(), b"", {})
+            return
+        location = self.server.redirects.get(self.path)
+        if location is not None:
+            self._send(302, b"", {"Location": location})
+            return
         data = self.server.resources.get(self.path)
         if data is None:
             self.send_error(404)
             return
         match = _RANGE_RE.fullmatch(self.headers.get("Range", ""))
+        if self.path in self.server.ignored_ranges:
+            self._send(200, data, {}, offset=0)
+            return
         if match is None:
             self._send(200, data, {"Accept-Ranges": "bytes"}, offset=0)
             return
@@ -39,7 +51,8 @@ class _Handler(BaseHTTPRequestHandler):
         if start >= len(data) or start > end:
             self._send(416, b"", {"Content-Range": "bytes */%d" % len(data)})
             return
-        content_range = "bytes %d-%d/%d" % (start, end, len(data))
+        total = self.server.totals.get(self.path, len(data))
+        content_range = "bytes %d-%d/%d" % (start, end, total)
         self._send(
             206,
             data[start : end + 1],
@@ -56,6 +69,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         for name, value in headers.items():
             self.send_header(name, value)
+        encoding = self.server.encodings.get(self.path)
+        if encoding is not None:
+            self.send_header("Content-Encoding", encoding)
         self.end_headers()
         # With a cut, Content-Length promises more than is written and the
         # connection is closed after the request (HTTP/1.0).
@@ -85,12 +101,22 @@ class HttpTestServer:
         self.requests = []
         self.cuts = {}
         self.corruptions = {}
+        self.ignored_ranges = set()
+        self.totals = {}
+        self.encodings = {}
+        self.statuses = {}
+        self.redirects = {}
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._httpd.daemon_threads = True
         self._httpd.resources = self.resources
         self._httpd.requests = self.requests
         self._httpd.cuts = self.cuts
         self._httpd.corruptions = self.corruptions
+        self._httpd.ignored_ranges = self.ignored_ranges
+        self._httpd.totals = self.totals
+        self._httpd.encodings = self.encodings
+        self._httpd.statuses = self.statuses
+        self._httpd.redirects = self.redirects
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, kwargs={"poll_interval": 0.01}
         )
@@ -114,6 +140,26 @@ class HttpTestServer:
     def corrupt_range(self, path, start, end):
         """Alter the bytes ``start``-``end`` (exclusive) of ``path`` when served."""
         self.corruptions[path] = (start, end)
+
+    def ignore_range(self, path):
+        """Answer ``Range`` requests for ``path`` with 200 and the whole body."""
+        self.ignored_ranges.add(path)
+
+    def report_total(self, path, total):
+        """Use ``total`` as the size in the ``Content-Range`` of ``path``."""
+        self.totals[path] = total
+
+    def set_content_encoding(self, path, encoding):
+        """Add ``Content-Encoding: <encoding>`` to the responses for ``path``."""
+        self.encodings[path] = encoding
+
+    def respond_with_statuses(self, path, statuses):
+        """Answer the next requests for ``path`` with these status codes."""
+        self.statuses[path] = collections.deque(statuses)
+
+    def redirect(self, path, location):
+        """Answer requests for ``path`` with a 302 to ``location``."""
+        self.redirects[path] = location
 
     def start(self):
         self._thread.start()

@@ -174,3 +174,87 @@ def test_request_log_records_other_headers_and_missing_paths(http_server):
     (record,) = http_server.requests
     assert record.path == "/missing"
     assert record.headers["X-Test"] == "1"
+
+
+# --- Injectable status and header faults (T24) ---
+
+
+def test_server_can_ignore_range(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.ignore_range("/file.bin")
+    with fetch(url, {"Range": "bytes=2-5"}) as response:
+        assert response.status == 200
+        assert response.headers["Content-Range"] is None
+        assert response.read() == DATA
+
+
+def test_server_can_report_a_different_total(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.report_total("/file.bin", 999)
+    with fetch(url, {"Range": "bytes=2-5"}) as response:
+        assert response.status == 206
+        assert response.headers["Content-Range"] == "bytes 2-5/999"
+        assert response.read() == DATA[2:6]
+
+
+def test_server_can_add_content_encoding(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.set_content_encoding("/file.bin", "gzip")
+    with fetch(url, {"Range": "bytes=2-5"}) as response:
+        assert response.status == 206
+        assert response.headers["Content-Encoding"] == "gzip"
+
+
+def test_other_paths_are_not_affected_by_faults(http_server):
+    http_server.serve("/a.bin", DATA)
+    other = http_server.serve("/b.bin", DATA)
+    http_server.ignore_range("/a.bin")
+    http_server.report_total("/a.bin", 1)
+    http_server.set_content_encoding("/a.bin", "gzip")
+    with fetch(other, {"Range": "bytes=2-5"}) as response:
+        assert response.status == 206
+        assert response.headers["Content-Range"] == "bytes 2-5/1024"
+        assert response.headers["Content-Encoding"] is None
+
+
+def test_status_sequence_is_consumed_one_per_request(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.respond_with_statuses("/file.bin", [404, 429, 503])
+    codes = []
+    for _ in range(3):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            fetch(url, {"Range": "bytes=0-9"})
+        codes.append(excinfo.value.code)
+    assert codes == [404, 429, 503]
+    with fetch(url, {"Range": "bytes=0-9"}) as response:
+        assert response.status == 206
+        assert response.read() == DATA[:10]
+    assert len(http_server.requests) == 4
+
+
+def test_status_sequence_applies_to_paths_without_resource(http_server):
+    http_server.respond_with_statuses("/nothing", [503])
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        fetch(http_server.url("/nothing"))
+    assert excinfo.value.code == 503
+
+
+def test_server_can_redirect_to_another_scheme(http_server):
+    http_server.serve("/file.bin", DATA)
+    http_server.redirect("/file.bin", "file:///etc/passwd")
+    connection = http.client.HTTPConnection("127.0.0.1", http_server.port)
+    try:
+        connection.request("GET", "/file.bin")
+        response = connection.getresponse()
+        assert response.status == 302
+        assert response.getheader("Location") == "file:///etc/passwd"
+    finally:
+        connection.close()
+
+
+def test_redirect_to_http_url_is_followed_by_urllib(http_server):
+    target = http_server.serve("/target.bin", DATA)
+    http_server.serve("/file.bin", b"")
+    http_server.redirect("/file.bin", target)
+    with fetch(http_server.url("/file.bin")) as response:
+        assert response.read() == DATA

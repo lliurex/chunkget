@@ -175,7 +175,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - El servidor puede, por configuración: cortar la conexión tras N bytes, corromper un fragmento concreto y registrar las peticiones recibidas.
   - Hecho cuando: tests comprueban cada fallo contra `urllib` (lectura truncada con excepción, bytes distintos en el fragmento elegido) y que el registro de peticiones refleja las cabeceras `Range`.
 
-- [ ] **T24 — Fallos de estado y cabeceras inyectables**
+- [x] **T24 — Fallos de estado y cabeceras inyectables**
   - RF/RNF: constitución §4
   - Depende de: T22
   - El servidor puede: ignorar `Range` (devolver 200), devolver otro total en `Content-Range`, añadir `Content-Encoding: gzip`, responder una secuencia de códigos (404, 429, 503…) y redirigir a otro esquema.
