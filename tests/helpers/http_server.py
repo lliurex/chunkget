@@ -63,7 +63,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _send(self, status, body, headers, offset=0):
         """Send ``body``, which starts at ``offset`` in the resource."""
         body = self._corrupt(body, offset)
-        cut_after = self.server.cuts.get(self.path)
+        cut_after = self._next_cut()
         self.send_response(status)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
@@ -76,6 +76,19 @@ class _Handler(BaseHTTPRequestHandler):
         # With a cut, Content-Length promises more than is written and the
         # connection is closed after the request (HTTP/1.0).
         self.wfile.write(body if cut_after is None else body[:cut_after])
+
+    def _next_cut(self):
+        """Bytes to send before cutting this response, or None for no cut."""
+        cut = self.server.cuts.get(self.path)
+        if cut is None:
+            return None
+        nbytes, remaining = cut
+        if remaining is None:
+            return nbytes
+        if remaining <= 0:
+            return None
+        cut[1] -= 1
+        return nbytes
 
     def _corrupt(self, body, offset):
         """Flip the bytes of ``body`` that fall in the corrupted range."""
@@ -133,9 +146,12 @@ class HttpTestServer:
         self.resources[path] = data
         return self.url(path)
 
-    def cut_connection_after(self, path, nbytes):
-        """Close the connection after ``nbytes`` of the body of ``path``."""
-        self.cuts[path] = nbytes
+    def cut_connection_after(self, path, nbytes, times=None):
+        """Close the connection after ``nbytes`` of the body of ``path``.
+
+        Only the next ``times`` responses are cut; by default all of them.
+        """
+        self.cuts[path] = [nbytes, times]
 
     def corrupt_range(self, path, start, end):
         """Alter the bytes ``start``-``end`` (exclusive) of ``path`` when served."""

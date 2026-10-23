@@ -217,7 +217,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `simple_download(url, path, timeout)`: GET en streaming directamente a la ruta indicada, sin fichero temporal.
   - Hecho cuando: un test descarga un recurso de varios búferes y el fichero coincide byte a byte; durante la descarga el directorio solo contiene el fichero destino.
 
-- [ ] **T31 — Descarga simple con reanudación**
+- [x] **T31 — Descarga simple con reanudación**
   - RF/RNF: RF3, D4
   - Depende de: T30, T23
   - Si la conexión se corta, reanuda con `Range` desde el tamaño ya escrito, con reintentos y espera inyectable (D7).

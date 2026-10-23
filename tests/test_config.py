@@ -104,3 +104,11 @@ def test_default_manifest_path():
 
 def test_default_destination():
     assert config.default_destination("image.iso") == Path("image.iso")
+
+
+@pytest.mark.parametrize(
+    "attempt, seconds",
+    [(1, 2), (2, 4), (3, 8), (4, 16), (5, 32), (6, 60), (7, 60), (50, 60)],
+)
+def test_retry_delay_doubles_up_to_a_minute(attempt, seconds):
+    assert config.retry_delay(attempt) == seconds

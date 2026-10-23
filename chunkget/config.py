@@ -18,6 +18,8 @@ BUFFER_SIZE = 1 * MIB
 MAX_MANIFEST_BYTES = 64 * MIB
 MAX_CHUNKS = 250_000
 MAX_CHUNK_SIZE = 1024 * MIB
+RETRY_DELAY_BASE = 2  # seconds
+RETRY_DELAY_MAX = 60  # seconds
 MAX_CONSECUTIVE_NETWORK_FAILURES = 3
 
 _SIZE_SUFFIXES = {"K": KIB, "M": MIB, "G": 1024 * MIB}
@@ -86,3 +88,8 @@ def default_manifest_path(name):
 def default_destination(name):
     """Default download destination: ``./<name>``."""
     return Path(name)
+
+
+def retry_delay(attempt):
+    """Seconds to wait before retry number ``attempt`` (1-based): 2, 4, 8... up to 60."""
+    return min(RETRY_DELAY_BASE * 2 ** (attempt - 1), RETRY_DELAY_MAX)

@@ -578,12 +578,12 @@ def test_simple_download_rejects_other_schemes(tmp_path):
     assert os.listdir(tmp_path) == []
 
 
-def test_cut_connection_is_a_retryable_error(http_server, tmp_path):
+def test_cut_connection_leaves_the_partial_file(http_server, tmp_path):
     url = http_server.serve("/f", big_data(5000))
     http_server.cut_connection_after("/f", 1500)
     destination = tmp_path / "f"
-    with pytest.raises(RetryableError):
-        http.simple_download(url, destination, 5)
+    with pytest.raises(NetworkError):
+        http.simple_download(url, destination, 5, max_retries=0)
     # The partial content stays, so that the download can be resumed.
     assert destination.read_bytes() == big_data(5000)[:1500]
 
@@ -600,3 +600,131 @@ def test_unwritable_destination_is_a_filesystem_error(http_server, tmp_path):
         assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
     finally:
         directory.chmod(0o700)
+
+
+# --- simple_download: resume (T31) ---
+
+import inspect
+
+
+def ranges_requested(server):
+    return [record.range for record in server.requests]
+
+
+def test_resume_defaults_follow_the_plan():
+    parameters = inspect.signature(http.simple_download).parameters
+    assert parameters["max_retries"].default == config.DEFAULT_MAX_RETRIES
+
+
+def test_download_resumes_after_a_cut(http_server, tmp_path):
+    data = big_data(5000)
+    url = http_server.serve("/f", data)
+    http_server.cut_connection_after("/f", 1500, times=1)
+    waits = []
+    destination = tmp_path / "f"
+    http.simple_download(url, destination, 5, sleep=waits.append)
+    assert destination.read_bytes() == data
+    assert ranges_requested(http_server) == [None, "bytes=1500-"]
+    assert waits == [2]
+    assert os.listdir(tmp_path) == ["f"]
+
+
+def test_download_resumes_after_several_cuts(http_server, tmp_path):
+    data = big_data(5000)
+    url = http_server.serve("/f", data)
+    http_server.cut_connection_after("/f", 1000, times=3)
+    waits = []
+    destination = tmp_path / "f"
+    http.simple_download(url, destination, 5, sleep=waits.append)
+    assert destination.read_bytes() == data
+    assert ranges_requested(http_server) == [
+        None,
+        "bytes=1000-",
+        "bytes=2000-",
+        "bytes=3000-",
+    ]
+    assert waits == [2, 4, 8]
+
+
+def test_download_resumes_after_a_cut_with_nothing_received(http_server, tmp_path):
+    data = big_data(3000)
+    url = http_server.serve("/f", data)
+    http_server.cut_connection_after("/f", 0, times=1)
+    destination = tmp_path / "f"
+    http.simple_download(url, destination, 5, sleep=lambda seconds: None)
+    assert destination.read_bytes() == data
+    # Nothing was written, so the retry is a plain request again.
+    assert ranges_requested(http_server) == [None, None]
+
+
+def test_download_gives_up_after_max_retries(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(10))
+    http_server.cut_connection_after("/f", 1)
+    waits = []
+    with pytest.raises(NetworkError) as excinfo:
+        http.simple_download(
+            url, tmp_path / "f", 5, max_retries=3, sleep=waits.append
+        )
+    assert excinfo.value.exit_code == ExitCode.NETWORK_ERROR
+    assert len(http_server.requests) == 4  # the first attempt plus 3 retries
+    assert waits == [2, 4, 8]
+    assert (tmp_path / "f").read_bytes() == big_data(10)[:4]
+
+
+def test_default_retries_wait_without_real_time(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(100))
+    http_server.cut_connection_after("/f", 1)
+    waits = []
+    with pytest.raises(NetworkError):
+        http.simple_download(url, tmp_path / "f", 5, sleep=waits.append)
+    assert waits == [2, 4, 8, 16, 32]
+    assert len(http_server.requests) == 6
+
+
+def test_no_retries_when_max_retries_is_zero(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(100))
+    http_server.cut_connection_after("/f", 10)
+    waits = []
+    with pytest.raises(NetworkError):
+        http.simple_download(
+            url, tmp_path / "f", 5, max_retries=0, sleep=waits.append
+        )
+    assert waits == []
+    assert len(http_server.requests) == 1
+
+
+def test_resume_against_a_server_without_ranges_is_incompatible(
+    http_server, tmp_path
+):
+    url = http_server.serve("/f", big_data(5000))
+    http_server.cut_connection_after("/f", 1500, times=1)
+    http_server.ignore_range("/f")
+    with pytest.raises(ServerIncompatibleError):
+        http.simple_download(url, tmp_path / "f", 5, sleep=lambda seconds: None)
+    assert (tmp_path / "f").read_bytes() == big_data(5000)[:1500]
+
+
+def test_resume_with_a_different_total_is_incompatible(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(5000))
+    http_server.cut_connection_after("/f", 1500, times=1)
+    http_server.report_total("/f", 9999)
+    with pytest.raises(ServerIncompatibleError):
+        http.simple_download(url, tmp_path / "f", 5, sleep=lambda seconds: None)
+
+
+def test_resume_with_content_encoding_is_incompatible(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(5000))
+    http_server.cut_connection_after("/f", 1500, times=1)
+    http_server.set_content_encoding("/f", "gzip")
+    with pytest.raises(ServerIncompatibleError):
+        http.simple_download(url, tmp_path / "f", 5, sleep=lambda seconds: None)
+
+
+def test_errors_of_the_first_request_are_not_retried(http_server, tmp_path):
+    waits = []
+    with pytest.raises(SourceError):
+        http.simple_download(
+            http_server.url("/missing"), tmp_path / "f", 5, sleep=waits.append
+        )
+    assert waits == []
+    assert len(http_server.requests) == 1

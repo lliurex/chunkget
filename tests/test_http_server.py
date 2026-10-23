@@ -258,3 +258,14 @@ def test_redirect_to_http_url_is_followed_by_urllib(http_server):
     http_server.redirect("/file.bin", target)
     with fetch(http_server.url("/file.bin")) as response:
         assert response.read() == DATA
+
+
+def test_cut_can_be_limited_to_the_first_requests(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.cut_connection_after("/file.bin", 10, times=2)
+    for _attempt in range(2):
+        with fetch(url) as response:
+            with pytest.raises(http.client.IncompleteRead):
+                response.read()
+    with fetch(url) as response:
+        assert response.read() == DATA

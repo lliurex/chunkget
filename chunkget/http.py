@@ -2,9 +2,11 @@
 
 import enum
 import http.client
+import os
 import re
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -205,24 +207,10 @@ class RangeStream:
         self.close()
 
 
-def open_range(url, start, end, timeout, *, total):
-    """Request the bytes ``start`` (inclusive) to ``end`` (exclusive) of ``url``.
-
-    ``total`` is the size of the whole resource according to the manifest.
-    Returns a stream of exactly ``end - start`` bytes. Errors are classified:
-    ``ServerIncompatibleError`` if the server does not honour the range,
-    ``RetryableError`` for transient failures and ``NetworkError`` for the rest.
-    """
+def _open_classified(url, timeout, headers):
+    """``open_url`` raising the exception that matches the kind of failure."""
     try:
-        response = open_url(
-            url,
-            timeout,
-            headers={
-                "Range": "bytes=%d-%d" % (start, end - 1),
-                "Accept-Encoding": "identity",
-                "User-Agent": "chunkget/" + __version__,
-            },
-        )
+        return open_url(url, timeout, headers)
     except ChunkgetError:
         raise
     except urllib.error.HTTPError as error:
@@ -238,6 +226,25 @@ def open_range(url, start, end, timeout, *, total):
             classify_exception(error),
             _("cannot connect to {url}: {reason}").format(url=url, reason=reason),
         ) from None
+
+
+def open_range(url, start, end, timeout, *, total):
+    """Request the bytes ``start`` (inclusive) to ``end`` (exclusive) of ``url``.
+
+    ``total`` is the size of the whole resource according to the manifest.
+    Returns a stream of exactly ``end - start`` bytes. Errors are classified:
+    ``ServerIncompatibleError`` if the server does not honour the range,
+    ``RetryableError`` for transient failures and ``NetworkError`` for the rest.
+    """
+    response = _open_classified(
+        url,
+        timeout,
+        {
+            "Range": "bytes=%d-%d" % (start, end - 1),
+            "Accept-Encoding": "identity",
+            "User-Agent": "chunkget/" + __version__,
+        },
+    )
     try:
         _check_range_response(response, start, end, total)
     except BaseException:
@@ -305,46 +312,133 @@ def fetch_bytes(url, max_bytes, timeout):
     return data
 
 
-def simple_download(url, path, timeout):
+def simple_download(
+    url, path, timeout, max_retries=config.DEFAULT_MAX_RETRIES, sleep=time.sleep
+):
     """GET ``url`` straight into ``path`` (no temporary file).
 
-    Failures to reach the source are ``SourceError``; a body cut short is a
-    ``RetryableError`` and the partial file stays where it is.
+    If the connection is cut, the download is resumed with a ``Range``
+    request from the size already written, up to ``max_retries`` times and
+    waiting ``config.retry_delay`` seconds (through ``sleep``) before each.
+    Failures to reach the source in the first request are ``SourceError``.
     """
-    try:
-        response = open_url(url, timeout)
-    except (OSError, http.client.HTTPException) as error:
-        raise _source_error(url, error) from None
-    with response:
-        length = response.headers.get("Content-Length")
+    resume = _ResumeState()
+    retries = 0
+    while True:
         try:
-            handle = open(path, "wb")
+            _transfer(url, path, timeout, resume)
+            return
+        except RetryableError as error:
+            if retries >= max_retries:
+                raise NetworkError(
+                    _("download of {url} failed after {retries} retries: {reason}").format(
+                        url=url, retries=retries, reason=error
+                    )
+                ) from None
+            retries += 1
+            sleep(config.retry_delay(retries))
+            resume.offset = os.path.getsize(path)
+
+
+class _ResumeState:
+    """Where the next attempt of a download starts and the size it expects."""
+
+    def __init__(self):
+        self.offset = 0
+        self.total = None
+
+
+def _transfer(url, path, timeout, resume):
+    """One attempt, starting at ``resume.offset``; raises RetryableError if cut."""
+    offset = resume.offset
+    if offset == 0:
+        try:
+            response = open_url(url, timeout)
+        except (OSError, http.client.HTTPException) as error:
+            raise _source_error(url, error) from None
+        length = response.headers.get("Content-Length")
+        if length is not None and length.isdigit():
+            resume.total = int(length)
+        mode = "wb"
+    else:
+        response = _open_classified(
+            url,
+            timeout,
+            {
+                "Range": "bytes=%d-" % offset,
+                "Accept-Encoding": "identity",
+                "User-Agent": "chunkget/" + __version__,
+            },
+        )
+        try:
+            resume.total = _check_resume_response(response, offset, resume.total)
+        except BaseException:
+            response.close()
+            raise
+        mode = "ab"
+    with response:
+        try:
+            handle = open(path, mode)
         except OSError as error:
             raise _write_error(path, error) from None
-        written = 0
+        received = offset
         with handle:
             while True:
                 try:
                     block = response.read(config.BUFFER_SIZE)
                 except (OSError, http.client.HTTPException) as error:
-                    raise RetryableError(
-                        _("connection failed while downloading {url}: {reason}").format(
-                            url=url, reason=error
-                        )
-                    ) from None
+                    raise _cut(url, error) from None
                 if not block:
                     break
                 try:
                     handle.write(block)
                 except OSError as error:
                     raise _write_error(path, error) from None
-                written += len(block)
-    if length is not None and length.isdigit() and written < int(length):
-        raise RetryableError(
-            _("incomplete download of {url}: received {received} of {expected} bytes").format(
-                url=url, received=written, expected=int(length)
-            )
+                received += len(block)
+    if resume.total is not None and received < resume.total:
+        raise _cut(
+            url,
+            _("received {received} of {expected} bytes").format(
+                received=received, expected=resume.total
+            ),
         )
+
+
+def _cut(url, reason):
+    return RetryableError(
+        _("connection failed while downloading {url}: {reason}").format(
+            url=url, reason=reason
+        )
+    )
+
+
+def _check_resume_response(response, offset, expected_total):
+    """Check the answer to a resume request; return the total size."""
+    content_range = response.headers.get("Content-Range")
+    match = _CONTENT_RANGE_RE.fullmatch(content_range or "")
+    total = expected_total
+    if total is None and match is not None:
+        total = int(match.group(3))
+    kind = classify_range_response(
+        response.status, content_range, total, response.headers.get("Content-Encoding")
+    )
+    if kind is None and int(match.group(1)) != offset:
+        kind = ErrorKind.INCOMPATIBLE
+    if kind is not None:
+        raise _exception_for(
+            kind,
+            _(
+                "cannot resume the download: HTTP {status}, Content-Range "
+                "{content_range!r} (expected bytes from {offset}), "
+                "Content-Encoding {encoding!r}"
+            ).format(
+                status=response.status,
+                content_range=content_range,
+                offset=offset,
+                encoding=response.headers.get("Content-Encoding"),
+            ),
+        )
+    return total
 
 
 def _write_error(path, error):
