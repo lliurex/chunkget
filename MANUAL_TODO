@@ -2,3 +2,5 @@ Revisar si al crear el hash incremental funciona correctamente.
 Si el directorio no existe creo que falla.
 Si la descarga se interrumpe y no se ha terminado el espacio escrito no se sobreescribe a 0, por lo que el espacio esta ocupado.
 Replantear el nombre de los estados. Actualmente es un hash combinando del hash del manifest y la ruta de descarga. Esto garantiza unicidad.
+En caso de modificacion del estado, una reanudacion podria seguir con una descarga que finalmente daria error. Propuesta de mejora: en una reanudacion hacer una validacion previa de cada chunk.
+
