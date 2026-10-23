@@ -1,4 +1,6 @@
+import dataclasses
 import json
+from pathlib import Path
 
 from chunkget.manifest import PROTOCOL_VERSION, Chunk, Manifest
 
@@ -494,3 +496,126 @@ def test_validate_accepts_a_consistent_manifest():
 def test_validate_rejects_invalid_values(changes):
     with pytest.raises(ManifestInvalidError):
         validate(dataclasses.replace(make_manifest(), **changes))
+
+
+# --- save_manifest: keep a downloaded manifest as a local file (T44) ---
+
+from chunkget.errors import FilesystemError, OutputExistsError
+from chunkget.manifest import save_manifest
+
+
+def manifest_bytes(**changes):
+    manifest = make_manifest()
+    if changes:
+        manifest = dataclasses.replace(manifest, **changes)
+    return manifest.to_json().encode("utf-8")
+
+
+def test_save_creates_the_file_with_the_same_bytes(tmp_path):
+    data = manifest_bytes()
+    path = tmp_path / "m.chunkget.manifest"
+    assert save_manifest(data, path) == path
+    assert path.read_bytes() == data
+    assert load_manifest_file(path) == make_manifest()
+
+
+def test_default_path_is_the_name_in_the_current_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = save_manifest(manifest_bytes())
+    assert result == Path("image.iso.chunkget.manifest")
+    assert (tmp_path / "image.iso.chunkget.manifest").read_bytes() == manifest_bytes()
+
+
+def test_explicit_path_is_used_instead_of_the_default(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_manifest(manifest_bytes(), tmp_path / "other.manifest")
+    assert os.listdir(tmp_path) == ["other.manifest"]
+
+
+def test_identical_content_is_not_rewritten_nor_an_error(tmp_path):
+    data = manifest_bytes()
+    path = tmp_path / "m.manifest"
+    path.write_bytes(data)
+    os.utime(path, (1_000_000, 1_000_000))
+    save_manifest(data, path)
+    save_manifest(data, path, overwrite=False)
+    assert path.stat().st_mtime == 1_000_000
+    assert path.read_bytes() == data
+
+
+def test_different_content_without_overwrite_is_refused(tmp_path):
+    path = tmp_path / "m.manifest"
+    path.write_bytes(b"something else")
+    with pytest.raises(OutputExistsError) as excinfo:
+        save_manifest(manifest_bytes(), path)
+    assert excinfo.value.exit_code == ExitCode.USER_DECLINED
+    assert str(path) in str(excinfo.value)
+    assert path.read_bytes() == b"something else"
+
+
+def test_different_content_with_overwrite_replaces_the_file(tmp_path):
+    path = tmp_path / "m.manifest"
+    path.write_bytes(b"something else that is much longer than the new one" * 100)
+    save_manifest(manifest_bytes(), path, overwrite=True)
+    assert path.read_bytes() == manifest_bytes()
+
+
+def test_longer_existing_file_with_the_same_start_counts_as_different(tmp_path):
+    data = manifest_bytes()
+    path = tmp_path / "m.manifest"
+    path.write_bytes(data + b"\n\n")
+    with pytest.raises(OutputExistsError):
+        save_manifest(data, path)
+    assert path.read_bytes() == data + b"\n\n"
+
+
+def test_invalid_manifest_creates_no_file(tmp_path):
+    path = tmp_path / "m.manifest"
+    with pytest.raises(ManifestInvalidError):
+        save_manifest(b"not a manifest", path)
+    assert os.listdir(tmp_path) == []
+
+
+def test_invalid_manifest_does_not_touch_an_existing_file(tmp_path):
+    path = tmp_path / "m.manifest"
+    path.write_bytes(b"precious")
+    with pytest.raises(ManifestInvalidError):
+        save_manifest(b"not a manifest", path, overwrite=True)
+    assert path.read_bytes() == b"precious"
+
+
+def test_manifest_with_an_inconsistent_chunk_list_is_not_saved(tmp_path):
+    data = manifest_bytes(size=151)
+    with pytest.raises(ManifestInvalidError):
+        save_manifest(data, tmp_path / "m.manifest")
+    assert os.listdir(tmp_path) == []
+
+
+def test_only_the_manifest_file_exists_afterwards(tmp_path):
+    save_manifest(manifest_bytes(), tmp_path / "m.manifest")
+    save_manifest(manifest_bytes(url="http://127.0.0.1/other"), tmp_path / "m.manifest",
+                  overwrite=True)
+    assert os.listdir(tmp_path) == ["m.manifest"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_read_only_directory_is_a_filesystem_error(tmp_path):
+    directory = tmp_path / "readonly"
+    directory.mkdir()
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError) as excinfo:
+            save_manifest(manifest_bytes(), directory / "m.manifest")
+    finally:
+        directory.chmod(0o700)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+
+
+def test_missing_directory_is_a_filesystem_error(tmp_path):
+    with pytest.raises(FilesystemError):
+        save_manifest(manifest_bytes(), tmp_path / "missing" / "m.manifest")
+
+
+def test_a_directory_in_place_of_the_file_is_a_filesystem_error(tmp_path):
+    with pytest.raises(FilesystemError):
+        save_manifest(manifest_bytes(), tmp_path)

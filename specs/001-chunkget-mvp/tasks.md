@@ -306,7 +306,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `downloader.py`: distingue ruta local de URL `http(s)` por esquema y devuelve un `Manifest` validado.
   - Hecho cuando: tests comprueban que una ruta y una URL (servidor de pruebas) devuelven manifests iguales, y que una URL con 404 lanza `SourceError` (3) y un contenido que no es un manifest lanza `ManifestInvalidError` (5).
 
-- [ ] **T44 — Guardar un manifest recibido como fichero local**
+- [x] **T44 — Guardar un manifest recibido como fichero local**
   - RF/RNF: RF6, D5
   - Depende de: T43, T10, T04
   - `manifest.py`: función que recibe los bytes ya validados y escribe el manifest directamente en la ruta local (por defecto `./<name>.chunkget.manifest`, o la ruta indicada), sin fichero intermedio. Si la ruta existe con contenido idéntico no hace nada; si difiere y no hay `overwrite`, lanza `OutputExistsError`; si hay `overwrite`, lo reemplaza. Un `OSError` se traduce a `FilesystemError` (código 10).

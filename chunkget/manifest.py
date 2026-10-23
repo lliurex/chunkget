@@ -6,7 +6,12 @@ import urllib.parse
 from typing import Tuple
 
 from chunkget import config, hashing
-from chunkget.errors import ManifestInvalidError, SourceError
+from chunkget.errors import (
+    ManifestInvalidError,
+    OutputExistsError,
+    SourceError,
+    filesystem_errors,
+)
 from chunkget.i18n import _
 
 PROTOCOL_VERSION = 1
@@ -352,3 +357,32 @@ def load_manifest_file(path):
             )
         )
     return load_manifest(data)
+
+
+def save_manifest(data, path=None, overwrite=False):
+    """Write manifest bytes straight to a local file and return its path.
+
+    ``data`` is validated first; an invalid manifest creates no file. The
+    default path is ``./<name>.chunkget.manifest``. If the file exists with
+    the same content nothing is done; if the content differs it is only
+    replaced when ``overwrite`` is true, otherwise ``OutputExistsError``.
+    """
+    loaded = load_manifest(data)
+    if path is None:
+        path = config.default_manifest_path(loaded.name)
+    with filesystem_errors(path):
+        try:
+            with open(path, "rb") as handle:
+                existing = handle.read(len(data) + 1)
+        except FileNotFoundError:
+            existing = None
+        if existing == data:
+            return path
+        if existing is not None and not overwrite:
+            raise OutputExistsError(
+                _("{path} already exists with a different content").format(path=path)
+            )
+        with open(path, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+    return path
