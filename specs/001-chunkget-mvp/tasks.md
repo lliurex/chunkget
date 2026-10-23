@@ -163,7 +163,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 5 — Servidor de pruebas y cliente HTTP
 
-- [ ] **T22 — Servidor de pruebas con `Range`**
+- [x] **T22 — Servidor de pruebas con `Range`**
   - RF/RNF: constitución §4
   - Depende de: T01
   - `tests/helpers/http_server.py`: servidor `http.server` en `127.0.0.1`, puerto efímero, que sirve bytes y responde `206` con `Content-Range` a peticiones con `Range`, y fixture de pytest.
