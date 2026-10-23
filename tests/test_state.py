@@ -417,3 +417,93 @@ def test_unreadable_state_is_a_filesystem_error(saved):
             state.load_state(directory, manifest, destination)
     finally:
         path.chmod(0o600)
+
+
+# --- State directory (T40) ---
+
+root_ignores_permissions = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores file permissions"
+)
+
+
+def test_default_directory_is_created_under_xdg_state_home(tmp_path, monkeypatch):
+    base = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_STATE_HOME", str(base))
+    result = state.ensure_state_dir()
+    assert result == base / "chunkget"
+    assert result.is_dir()
+
+
+def test_default_directory_without_xdg_state_home(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    result = state.ensure_state_dir()
+    assert result == tmp_path / ".local" / "state" / "chunkget"
+    assert result.is_dir()
+
+
+def test_explicit_directory_is_used_and_created(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    explicit = tmp_path / "a" / "b" / "states"
+    result = state.ensure_state_dir(explicit)
+    assert result == explicit
+    assert explicit.is_dir()
+    # The default location is not touched.
+    assert not (tmp_path / "xdg").exists()
+
+
+def test_existing_directory_is_accepted_and_kept(tmp_path):
+    directory = tmp_path / "states"
+    directory.mkdir()
+    (directory / "other.json").write_text("{}")
+    assert state.ensure_state_dir(directory) == directory
+    assert state.ensure_state_dir(directory) == directory
+    assert os.listdir(directory) == ["other.json"]
+
+
+def test_created_directory_is_private(tmp_path):
+    directory = state.ensure_state_dir(tmp_path / "states")
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+@root_ignores_permissions
+def test_unwritable_existing_directory_is_a_filesystem_error(tmp_path):
+    directory = tmp_path / "states"
+    directory.mkdir()
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError) as excinfo:
+            state.ensure_state_dir(directory)
+    finally:
+        directory.chmod(0o700)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+    assert str(directory) in str(excinfo.value)
+
+
+@root_ignores_permissions
+def test_directory_that_cannot_be_created_is_a_filesystem_error(tmp_path):
+    parent = tmp_path / "readonly"
+    parent.mkdir()
+    parent.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError) as excinfo:
+            state.ensure_state_dir(parent / "states")
+    finally:
+        parent.chmod(0o700)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+
+
+def test_a_file_in_place_of_the_directory_is_a_filesystem_error(tmp_path):
+    path = tmp_path / "states"
+    path.write_text("not a directory")
+    with pytest.raises(FilesystemError):
+        state.ensure_state_dir(path)
+
+
+def test_the_directory_can_be_used_to_save_and_load_a_state(tmp_path):
+    manifest = make_manifest(tmp_path)
+    destination = tmp_path / "image.iso"
+    directory = state.ensure_state_dir(tmp_path / "states")
+    new = state.new_state(manifest, destination)
+    state.save_state(new, directory)
+    assert state.load_state(directory, manifest, destination) == new

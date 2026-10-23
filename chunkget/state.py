@@ -7,7 +7,8 @@ import json
 import os
 from pathlib import Path
 
-from chunkget.errors import StateInvalidError, filesystem_errors
+from chunkget import config
+from chunkget.errors import FilesystemError, StateInvalidError, filesystem_errors
 from chunkget.i18n import _
 
 STATE_VERSION = 1
@@ -183,3 +184,19 @@ def load_state(directory, manifest, destination):
         except FileNotFoundError:
             return None
     return from_json(data, manifest)
+
+
+def ensure_state_dir(directory=None):
+    """Return the state directory, creating it if needed.
+
+    Uses ``directory`` (``--state-dir``) or the default of the plan. Raises
+    ``FilesystemError`` if it cannot be created or written to.
+    """
+    path = Path(directory) if directory is not None else config.default_state_dir()
+    with filesystem_errors(path):
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not os.access(path, os.W_OK | os.X_OK):
+        raise FilesystemError(
+            _("state directory {path} is not writable").format(path=path)
+        )
+    return path

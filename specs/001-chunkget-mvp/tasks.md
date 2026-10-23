@@ -278,7 +278,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Escribe `<state_key>.json.tmp`, `fsync`, `os.replace` y `fsync` del directorio; carga validando.
   - Hecho cuando: tests comprueban la ida y vuelta, que no queda `.tmp` tras guardar, y que si `os.replace` falla (simulado) el estado anterior sigue intacto y legible.
 
-- [ ] **T40 — Directorio de estado**
+- [x] **T40 — Directorio de estado**
   - RF/RNF: RF8, RF1.4, caso «directorio de estado inaccesible»
   - Depende de: T39, T10
   - Crea el directorio si no existe y respeta `--state-dir`.
