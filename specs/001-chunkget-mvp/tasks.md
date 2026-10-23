@@ -245,7 +245,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `storage.write_chunk(path, start, stream, length)` escribe en bloques de 1 MiB en `start`, calcula el hash mientras escribe, hace `flush` y `os.fsync`, y devuelve el hash.
   - Hecho cuando: un test escribe el fragmento 2 de un fichero de 3 fragmentos y comprueba que solo cambian los bytes de esa posición, que el hash devuelto coincide con `hashlib` y que `os.fsync` se llamó (simulado).
 
-- [ ] **T35 — Errores del sistema de ficheros**
+- [x] **T35 — Errores del sistema de ficheros**
   - RF/RNF: caso «destino sin permisos», RNF3
   - Depende de: T33, T34
   - Traduce `OSError` (permisos, disco lleno) a `FilesystemError` (código 10) en `storage`.

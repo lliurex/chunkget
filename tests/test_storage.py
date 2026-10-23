@@ -181,9 +181,9 @@ def test_other_fallocate_errors_are_not_hidden(tmp_path, monkeypatch):
         raise OSError(errno.EIO, "I/O error")
 
     monkeypatch.setattr(storage.os, "posix_fallocate", failing)
-    with pytest.raises(OSError) as excinfo:
+    with pytest.raises(FilesystemError) as excinfo:
         storage.prepare_destination(tmp_path / "image.iso", 100)
-    assert excinfo.value.errno == errno.EIO
+    assert "I/O error" in str(excinfo.value)
 
 
 def test_prepare_checks_free_space_before_creating_anything(free_space, tmp_path):
@@ -327,3 +327,140 @@ def test_write_chunk_does_not_change_the_file_size(tmp_path):
     destination = make_file(tmp_path, 100)
     storage.write_chunk(destination, 90, io.BytesIO(chunk_data(10)), 10)
     assert destination.stat().st_size == 100
+
+
+# --- Filesystem errors (T35) ---
+
+import gettext
+
+from chunkget import i18n
+from chunkget.errors import FilesystemError
+
+root_ignores_permissions = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores file permissions"
+)
+
+
+class PrefixTranslations(gettext.NullTranslations):
+    def gettext(self, message):
+        return "T: " + message
+
+
+@pytest.fixture
+def prefix_translation():
+    previous = i18n.get_translation()
+    i18n.set_translation(PrefixTranslations())
+    yield
+    i18n.set_translation(previous)
+
+
+@root_ignores_permissions
+def test_prepare_in_a_read_only_directory_is_a_filesystem_error(tmp_path):
+    directory = tmp_path / "readonly"
+    directory.mkdir()
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError) as excinfo:
+            storage.prepare_destination(directory / "image.iso", 100)
+    finally:
+        directory.chmod(0o700)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+    assert "image.iso" in str(excinfo.value)
+    assert "Permission denied" in str(excinfo.value)
+
+
+@root_ignores_permissions
+def test_write_chunk_into_a_read_only_file_is_a_filesystem_error(tmp_path):
+    destination = make_file(tmp_path, 100)
+    destination.chmod(0o400)
+    with pytest.raises(FilesystemError) as excinfo:
+        storage.write_chunk(destination, 0, io.BytesIO(chunk_data(100)), 100)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+
+
+def test_missing_directory_is_a_filesystem_error(tmp_path):
+    with pytest.raises(FilesystemError):
+        storage.check_free_space(tmp_path / "missing", 1)
+    with pytest.raises(FilesystemError):
+        storage.prepare_destination(tmp_path / "missing" / "image.iso", 1)
+
+
+def test_write_chunk_into_a_missing_file_is_a_filesystem_error(tmp_path):
+    with pytest.raises(FilesystemError):
+        storage.write_chunk(
+            tmp_path / "missing", 0, io.BytesIO(chunk_data(10)), 10
+        )
+
+
+def no_space(*args, **kwargs):
+    raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+
+def test_disk_full_while_preallocating_is_a_filesystem_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.os, "posix_fallocate", no_space)
+    with pytest.raises(FilesystemError) as excinfo:
+        storage.prepare_destination(tmp_path / "image.iso", 100)
+    assert "No space left on device" in str(excinfo.value)
+
+
+def test_disk_full_while_truncating_is_a_filesystem_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.os, "ftruncate", no_space)
+    with pytest.raises(FilesystemError):
+        storage.prepare_destination(tmp_path / "image.iso", 100)
+
+
+def test_disk_full_while_syncing_is_a_filesystem_error(tmp_path, monkeypatch):
+    destination = make_file(tmp_path, 100)
+    monkeypatch.setattr(storage.os, "fsync", no_space)
+    with pytest.raises(FilesystemError) as excinfo:
+        storage.write_chunk(destination, 0, io.BytesIO(chunk_data(100)), 100)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+
+
+def test_disk_full_while_writing_is_a_filesystem_error(tmp_path, monkeypatch):
+    class FullDisk:
+        def seek(self, position):
+            pass
+
+        def write(self, data):
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self.close()
+
+    monkeypatch.setattr(storage, "open", lambda *a, **k: FullDisk(), raising=False)
+    with pytest.raises(FilesystemError) as excinfo:
+        storage.write_chunk(
+            tmp_path / "image.iso", 0, io.BytesIO(chunk_data(10)), 10
+        )
+    assert "No space left on device" in str(excinfo.value)
+
+
+def test_errors_reading_the_stream_are_not_filesystem_errors(tmp_path):
+    class BrokenStream:
+        def read(self, size):
+            raise ConnectionResetError("reset")
+
+    destination = make_file(tmp_path, 100)
+    with pytest.raises(ConnectionResetError):
+        storage.write_chunk(destination, 0, BrokenStream(), 100)
+
+
+def test_filesystem_error_messages_are_translatable(tmp_path, prefix_translation):
+    with pytest.raises(FilesystemError) as excinfo:
+        storage.write_chunk(
+            tmp_path / "missing", 0, io.BytesIO(chunk_data(10)), 10
+        )
+    assert str(excinfo.value).startswith("T: ")
+
+
+def test_not_enough_space_is_still_a_no_space_error(free_space, tmp_path):
+    free_space["free"] = 1
+    with pytest.raises(NoSpaceError):
+        storage.prepare_destination(tmp_path / "image.iso", 100)
