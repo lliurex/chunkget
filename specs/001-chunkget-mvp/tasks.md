@@ -193,7 +193,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Función pura que clasifica una excepción o un estado en: reintentable, fatal (código 6), incompatible (código 11) o de origen (código 3).
   - Hecho cuando: tests parametrizados cubren toda la tabla de D5: reset, timeout, 5xx, 408, 429 → reintentable; 403, 404, fallo de certificado → fatal; 200 en lugar de 206, total distinto y `Content-Encoding` → incompatible.
 
-- [ ] **T27 — Lectura en memoria de un recurso**
+- [x] **T27 — Lectura en memoria de un recurso**
   - RF/RNF: RF6, RF4
   - Depende de: T25, T26, T22
   - `fetch_bytes(url, max_bytes, timeout)` con tope de 64 MiB.

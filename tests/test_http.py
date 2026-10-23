@@ -211,3 +211,83 @@ def test_200_range_response_is_incompatible():
 def test_error_statuses_are_classified_before_headers():
     assert classify_range(status=503, content_range=None) is ErrorKind.RETRYABLE
     assert classify_range(status=404, content_range=None) is ErrorKind.FATAL
+
+
+# --- fetch_bytes (T27) ---
+
+from chunkget.errors import ManifestInvalidError
+
+LIMIT = 64 * 1024 * 1024
+
+
+def test_fetch_bytes_returns_the_content(http_server):
+    url = http_server.serve("/m.json", b'{"a": 1}')
+    assert http.fetch_bytes(url, LIMIT, 5) == b'{"a": 1}'
+
+
+def test_fetch_bytes_accepts_content_of_exactly_the_limit(http_server):
+    url = http_server.serve("/m.json", b"x" * 100)
+    assert http.fetch_bytes(url, 100, 5) == b"x" * 100
+
+
+def test_fetch_bytes_rejects_content_over_the_limit(http_server):
+    url = http_server.serve("/m.json", b"x" * 101)
+    with pytest.raises(ManifestInvalidError) as excinfo:
+        http.fetch_bytes(url, 100, 5)
+    assert excinfo.value.exit_code == ExitCode.MANIFEST_INVALID
+    assert "100" in str(excinfo.value)
+
+
+def test_fetch_bytes_does_not_read_a_huge_body_when_length_is_known(http_server):
+    url = http_server.serve("/big", b"x" * 10_000)
+    http_server.cut_connection_after("/big", 10)  # a read would fail
+    with pytest.raises(ManifestInvalidError):
+        http.fetch_bytes(url, 100, 5)
+
+
+@pytest.mark.parametrize("status", [403, 404, 500, 503])
+def test_fetch_bytes_http_errors_are_source_errors(http_server, status):
+    http_server.respond_with_statuses("/m.json", [status])
+    with pytest.raises(SourceError) as excinfo:
+        http.fetch_bytes(http_server.url("/m.json"), LIMIT, 5)
+    assert excinfo.value.exit_code == ExitCode.SOURCE_ERROR
+    assert str(status) in str(excinfo.value)
+
+
+def test_fetch_bytes_missing_resource_is_a_source_error(http_server):
+    with pytest.raises(SourceError):
+        http.fetch_bytes(http_server.url("/missing"), LIMIT, 5)
+
+
+def test_fetch_bytes_timeout_is_a_source_error():
+    import socket
+
+    # Accepts connections in the kernel backlog but never answers.
+    with socket.socket() as silent:
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        url = "http://127.0.0.1:%d/m.json" % silent.getsockname()[1]
+        with pytest.raises(SourceError):
+            http.fetch_bytes(url, LIMIT, 0.2)
+
+
+def test_fetch_bytes_connection_refused_is_a_source_error():
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with pytest.raises(SourceError):
+        http.fetch_bytes("http://127.0.0.1:%d/m.json" % port, LIMIT, 5)
+
+
+def test_fetch_bytes_truncated_body_is_a_source_error(http_server):
+    url = http_server.serve("/m.json", b"x" * 1000)
+    http_server.cut_connection_after("/m.json", 10)
+    with pytest.raises(SourceError):
+        http.fetch_bytes(url, LIMIT, 5)
+
+
+def test_fetch_bytes_rejects_other_schemes():
+    with pytest.raises(SourceError):
+        http.fetch_bytes("file:///etc/passwd", LIMIT, 5)

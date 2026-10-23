@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from chunkget.errors import ExitCode, SourceError
+from chunkget.errors import ExitCode, ManifestInvalidError, SourceError
 from chunkget.i18n import _
 
 ALLOWED_SCHEMES = ("http", "https")
@@ -129,3 +129,42 @@ def classify_range_response(status, content_range, expected_total, content_encod
     if content_encoding and content_encoding.strip().lower() != "identity":
         return ErrorKind.INCOMPATIBLE
     return None
+
+
+def fetch_bytes(url, max_bytes, timeout):
+    """Read a small resource into memory.
+
+    Network and HTTP failures are source errors; a resource larger than
+    ``max_bytes`` is an invalid manifest.
+    """
+    try:
+        with open_url(url, timeout) as response:
+            length = response.headers.get("Content-Length")
+            if length is not None and length.isdigit() and int(length) > max_bytes:
+                raise _too_large(max_bytes)
+            data = response.read(max_bytes + 1)
+            # read(n) does not raise IncompleteRead when the body is cut.
+            if length is not None and length.isdigit() and len(data) < int(length):
+                raise http.client.IncompleteRead(data, int(length) - len(data))
+    except urllib.error.HTTPError as error:
+        raise SourceError(
+            _("cannot fetch {url}: HTTP error {status}").format(
+                url=url, status=error.code
+            )
+        ) from None
+    except (OSError, http.client.HTTPException) as error:
+        reason = getattr(error, "reason", None) or error
+        raise SourceError(
+            _("cannot fetch {url}: {reason}").format(url=url, reason=reason)
+        ) from None
+    if len(data) > max_bytes:
+        raise _too_large(max_bytes)
+    return data
+
+
+def _too_large(max_bytes):
+    return ManifestInvalidError(
+        _("invalid manifest: it is larger than {maximum} bytes").format(
+            maximum=max_bytes
+        )
+    )
