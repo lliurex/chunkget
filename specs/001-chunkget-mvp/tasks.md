@@ -255,7 +255,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 7 — Fichero de estado
 
-- [ ] **T36 — Modelo del estado y serialización**
+- [x] **T36 — Modelo del estado y serialización**
   - RF/RNF: RF8
   - Depende de: T18
   - `state.py`: dataclass con `state_version`, `manifest_id`, `destination`, `chunk_states` (`P`/`C`/`F`) y `status`; `new_state(manifest, destination)` con todos los fragmentos en `P`; `to_json`/`from_json`.
