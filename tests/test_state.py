@@ -507,3 +507,121 @@ def test_the_directory_can_be_used_to_save_and_load_a_state(tmp_path):
     new = state.new_state(manifest, destination)
     state.save_state(new, directory)
     assert state.load_state(directory, manifest, destination) == new
+
+
+# --- Download lock (T41) ---
+
+import subprocess
+import sys
+
+from chunkget.errors import AlreadyRunningError
+
+KEY = "0123456789abcdef0123456789abcdef"
+
+
+def test_lock_creates_an_empty_lock_file_named_after_the_key(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        path = tmp_path / (KEY + ".lock")
+        assert path == state.lock_path(tmp_path, KEY)
+        assert path.is_file()
+        assert path.stat().st_size == 0
+
+
+def test_second_lock_for_the_same_key_fails(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        with pytest.raises(AlreadyRunningError) as excinfo:
+            with state.lock_download(tmp_path, KEY):
+                pytest.fail("the second lock must not be acquired")
+    assert excinfo.value.exit_code == ExitCode.ALREADY_RUNNING
+
+
+def test_lock_can_be_acquired_again_after_releasing(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        pass
+    with state.lock_download(tmp_path, KEY):
+        pass
+
+
+def test_failed_attempt_does_not_release_the_first_lock(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        for _attempt in range(2):
+            with pytest.raises(AlreadyRunningError):
+                with state.lock_download(tmp_path, KEY):
+                    pass
+
+
+def test_lock_is_released_when_the_body_raises(tmp_path):
+    with pytest.raises(RuntimeError):
+        with state.lock_download(tmp_path, KEY):
+            raise RuntimeError("boom")
+    with state.lock_download(tmp_path, KEY):
+        pass
+
+
+def test_different_keys_do_not_conflict(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        with state.lock_download(tmp_path, "f" * 32):
+            pass
+
+
+def test_lock_file_is_kept_after_releasing(tmp_path):
+    with state.lock_download(tmp_path, KEY):
+        pass
+    assert os.listdir(tmp_path) == [KEY + ".lock"]
+    assert (tmp_path / (KEY + ".lock")).stat().st_size == 0
+
+
+def test_lock_in_a_missing_directory_is_a_filesystem_error(tmp_path):
+    with pytest.raises(FilesystemError):
+        with state.lock_download(tmp_path / "missing", KEY):
+            pass
+
+
+def test_lock_is_held_across_processes(tmp_path):
+    path = tmp_path / (KEY + ".lock")
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys\n"
+            "handle = open(sys.argv[1], 'a')\n"
+            "fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+            "print('locked', flush=True)\n"
+            "sys.stdin.read()\n",
+            str(path),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        with pytest.raises(AlreadyRunningError):
+            with state.lock_download(tmp_path, KEY):
+                pass
+    finally:
+        holder.stdin.close()
+        holder.wait(timeout=10)
+    with state.lock_download(tmp_path, KEY):
+        pass
+
+
+def test_lock_error_message_is_translatable(tmp_path):
+    import gettext
+
+    from chunkget import i18n
+
+    class Prefix(gettext.NullTranslations):
+        def gettext(self, message):
+            return "T: " + message
+
+    previous = i18n.get_translation()
+    i18n.set_translation(Prefix())
+    try:
+        with state.lock_download(tmp_path, KEY):
+            with pytest.raises(AlreadyRunningError) as excinfo:
+                with state.lock_download(tmp_path, KEY):
+                    pass
+    finally:
+        i18n.set_translation(previous)
+    assert str(excinfo.value).startswith("T: ")

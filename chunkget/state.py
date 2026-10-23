@@ -2,13 +2,19 @@
 
 import contextlib
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 
 from chunkget import config
-from chunkget.errors import FilesystemError, StateInvalidError, filesystem_errors
+from chunkget.errors import (
+    AlreadyRunningError,
+    FilesystemError,
+    StateInvalidError,
+    filesystem_errors,
+)
 from chunkget.i18n import _
 
 STATE_VERSION = 1
@@ -200,3 +206,36 @@ def ensure_state_dir(directory=None):
             _("state directory {path} is not writable").format(path=path)
         )
     return path
+
+
+def lock_path(directory, key):
+    return Path(directory) / (key + ".lock")
+
+
+@contextlib.contextmanager
+def lock_download(directory, key):
+    """Hold an exclusive lock on the download identified by ``key``.
+
+    Usable with ``with``. Raises ``AlreadyRunningError`` at once, without
+    waiting, if another process (or this one) holds it. The empty lock file
+    stays in the directory afterwards.
+    """
+    path = lock_path(directory, key)
+    with filesystem_errors(path):
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AlreadyRunningError(
+                _("another download of the same file is already running (lock {path})").format(
+                    path=path
+                )
+            ) from None
+        except OSError as error:
+            with filesystem_errors(path):
+                raise error
+        yield
+    finally:
+        # Closing the descriptor releases the lock.
+        os.close(fd)

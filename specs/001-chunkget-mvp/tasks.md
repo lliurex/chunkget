@@ -284,7 +284,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Crea el directorio si no existe y respeta `--state-dir`.
   - Hecho cuando: tests comprueban que se crea el directorio por defecto bajo un `XDG_STATE_HOME` de prueba, que se usa uno indicado explícitamente y que uno no escribible lanza `FilesystemError` (10).
 
-- [ ] **T41 — Bloqueo de descarga**
+- [x] **T41 — Bloqueo de descarga**
   - RF/RNF: caso «dos descargas simultáneas», D10
   - Depende de: T40
   - Bloqueo con `fcntl.flock(LOCK_EX | LOCK_NB)` sobre `<state_key>.lock`, utilizable con `with`.
