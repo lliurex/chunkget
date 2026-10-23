@@ -239,3 +239,29 @@ def lock_download(directory, key):
     finally:
         # Closing the descriptor releases the lock.
         os.close(fd)
+
+
+def set_chunk_state(state, chunk_id, char, directory):
+    """Set the state of one chunk and save the state file at once.
+
+    If saving fails the state in memory is left as it was. Raises
+    ``IndexError`` for an unknown chunk id and ``ValueError`` for a state
+    character other than P, C or F (both are programming errors).
+    """
+    if not 0 <= chunk_id < len(state.chunk_states):
+        raise IndexError(
+            _("chunk id {chunk_id} is out of range (0 to {last})").format(
+                chunk_id=chunk_id, last=len(state.chunk_states) - 1
+            )
+        )
+    if char not in _CHUNK_STATES:
+        raise ValueError(
+            _("invalid chunk state {char!r}: use P, C or F").format(char=char)
+        )
+    previous = state.chunk_states
+    state.chunk_states = previous[:chunk_id] + char + previous[chunk_id + 1 :]
+    try:
+        save_state(state, directory)
+    except BaseException:
+        state.chunk_states = previous
+        raise

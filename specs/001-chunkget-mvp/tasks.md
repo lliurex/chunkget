@@ -290,7 +290,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Bloqueo con `fcntl.flock(LOCK_EX | LOCK_NB)` sobre `<state_key>.lock`, utilizable con `with`.
   - Hecho cuando: un test abre dos bloqueos para la misma clave y el segundo lanza `AlreadyRunningError` (12); tras liberar el primero, el segundo se adquiere.
 
-- [ ] **T42 — Actualizar el estado de un fragmento**
+- [x] **T42 — Actualizar el estado de un fragmento**
   - RF/RNF: RF9
   - Depende de: T39
   - `set_chunk_state(state, id, char)` y guardado inmediato.

@@ -625,3 +625,75 @@ def test_lock_error_message_is_translatable(tmp_path):
     finally:
         i18n.set_translation(previous)
     assert str(excinfo.value).startswith("T: ")
+
+
+# --- set_chunk_state (T42) ---
+
+
+def test_set_chunk_state_is_saved_immediately(saved):
+    manifest, destination, directory, new = saved
+    state.set_chunk_state(new, 1, state.CORRECT, directory)
+    state.set_chunk_state(new, 2, state.FAILED, directory)
+    assert new.chunk_states == "PCF"
+    # Read it back from disk, not from memory.
+    on_disk = state.load_state(directory, manifest, destination)
+    assert on_disk.chunk_states == "PCF"
+    assert on_disk == new
+
+
+def test_each_change_reaches_the_disk_before_the_next_one(saved):
+    manifest, destination, directory, new = saved
+    seen = []
+    for index in range(3):
+        state.set_chunk_state(new, index, state.CORRECT, directory)
+        seen.append(
+            state.load_state(directory, manifest, destination).chunk_states
+        )
+    assert seen == ["CPP", "CCP", "CCC"]
+
+
+def test_a_chunk_can_change_state_again(saved):
+    manifest, destination, directory, new = saved
+    state.set_chunk_state(new, 0, state.FAILED, directory)
+    state.set_chunk_state(new, 0, state.CORRECT, directory)
+    state.set_chunk_state(new, 0, state.CORRECT, directory)
+    assert state.load_state(directory, manifest, destination).chunk_states == "CPP"
+
+
+@pytest.mark.parametrize("chunk_id", [-1, 3, 4, 100])
+def test_chunk_id_out_of_range_is_an_error(saved, chunk_id):
+    manifest, destination, directory, new = saved
+    with pytest.raises(IndexError):
+        state.set_chunk_state(new, chunk_id, state.CORRECT, directory)
+    assert new.chunk_states == "PPP"
+    assert state.load_state(directory, manifest, destination).chunk_states == "PPP"
+
+
+@pytest.mark.parametrize("char", ["X", "c", "PC", "", " "])
+def test_invalid_state_character_is_an_error(saved, char):
+    manifest, destination, directory, new = saved
+    with pytest.raises(ValueError):
+        state.set_chunk_state(new, 0, char, directory)
+    assert new.chunk_states == "PPP"
+
+
+def test_state_in_memory_is_unchanged_if_saving_fails(saved, monkeypatch):
+    manifest, destination, directory, new = saved
+
+    def failing_replace(source, target):
+        raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(state.os, "replace", failing_replace)
+    with pytest.raises(FilesystemError):
+        state.set_chunk_state(new, 1, state.CORRECT, directory)
+    assert new.chunk_states == "PPP"
+    monkeypatch.undo()
+    assert state.load_state(directory, manifest, destination).chunk_states == "PPP"
+
+
+def test_chunk_state_of_an_empty_file_has_no_valid_id(tmp_path):
+    manifest = make_manifest(tmp_path, size=0)
+    directory = state.ensure_state_dir(tmp_path / "states")
+    new = state.new_state(manifest, tmp_path / "image.iso")
+    with pytest.raises(IndexError):
+        state.set_chunk_state(new, 0, state.CORRECT, directory)
