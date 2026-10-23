@@ -1,5 +1,6 @@
 """Local HTTP server with ``Range`` support for tests (127.0.0.1 only)."""
 
+import dataclasses
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -7,15 +8,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _RANGE_RE = re.compile(r"bytes=(\d+)-(\d*)")
 
 
+@dataclasses.dataclass(frozen=True)
+class RequestRecord:
+    """A request received by the server."""
+
+    path: str
+    headers: dict
+
+    @property
+    def range(self):
+        return self.headers.get("Range")
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        self.server.requests.append(
+            RequestRecord(self.path, dict(self.headers.items()))
+        )
         data = self.server.resources.get(self.path)
         if data is None:
             self.send_error(404)
             return
         match = _RANGE_RE.fullmatch(self.headers.get("Range", ""))
         if match is None:
-            self._send(200, data, {"Accept-Ranges": "bytes"})
+            self._send(200, data, {"Accept-Ranges": "bytes"}, offset=0)
             return
         start = int(match.group(1))
         end = int(match.group(2)) if match.group(2) else len(data) - 1
@@ -24,16 +40,38 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(416, b"", {"Content-Range": "bytes */%d" % len(data)})
             return
         content_range = "bytes %d-%d/%d" % (start, end, len(data))
-        self._send(206, data[start : end + 1], {"Content-Range": content_range})
+        self._send(
+            206,
+            data[start : end + 1],
+            {"Content-Range": content_range},
+            offset=start,
+        )
 
-    def _send(self, status, body, headers):
+    def _send(self, status, body, headers, offset=0):
+        """Send ``body``, which starts at ``offset`` in the resource."""
+        body = self._corrupt(body, offset)
+        cut_after = self.server.cuts.get(self.path)
         self.send_response(status)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
         for name, value in headers.items():
             self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(body)
+        # With a cut, Content-Length promises more than is written and the
+        # connection is closed after the request (HTTP/1.0).
+        self.wfile.write(body if cut_after is None else body[:cut_after])
+
+    def _corrupt(self, body, offset):
+        """Flip the bytes of ``body`` that fall in the corrupted range."""
+        span = self.server.corruptions.get(self.path)
+        if span is None:
+            return body
+        low = max(span[0], offset) - offset
+        high = min(span[1], offset + len(body)) - offset
+        if low >= high:
+            return body
+        middle = bytes(byte ^ 0xFF for byte in body[low:high])
+        return body[:low] + middle + body[high:]
 
     def log_message(self, format, *args):
         pass
@@ -44,9 +82,15 @@ class HttpTestServer:
 
     def __init__(self):
         self.resources = {}
+        self.requests = []
+        self.cuts = {}
+        self.corruptions = {}
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._httpd.daemon_threads = True
         self._httpd.resources = self.resources
+        self._httpd.requests = self.requests
+        self._httpd.cuts = self.cuts
+        self._httpd.corruptions = self.corruptions
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, kwargs={"poll_interval": 0.01}
         )
@@ -62,6 +106,14 @@ class HttpTestServer:
         """Publish ``data`` at ``path`` and return its URL."""
         self.resources[path] = data
         return self.url(path)
+
+    def cut_connection_after(self, path, nbytes):
+        """Close the connection after ``nbytes`` of the body of ``path``."""
+        self.cuts[path] = nbytes
+
+    def corrupt_range(self, path, start, end):
+        """Alter the bytes ``start``-``end`` (exclusive) of ``path`` when served."""
+        self.corruptions[path] = (start, end)
 
     def start(self):
         self._thread.start()

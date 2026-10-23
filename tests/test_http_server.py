@@ -85,3 +85,92 @@ def test_server_works_as_context_manager():
             assert response.read() == DATA[:1]
     with pytest.raises(urllib.error.URLError):
         fetch(url)
+
+
+# --- Injectable data faults (T23) ---
+
+import http.client
+
+
+def test_connection_cut_after_n_bytes_truncates_the_read(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.cut_connection_after("/file.bin", 100)
+    with fetch(url, {"Range": "bytes=0-499"}) as response:
+        assert response.headers["Content-Length"] == "500"
+        with pytest.raises(http.client.IncompleteRead) as excinfo:
+            response.read()
+    assert excinfo.value.partial == DATA[:100]
+
+
+def test_connection_cut_also_applies_without_range(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.cut_connection_after("/file.bin", 10)
+    with fetch(url) as response:
+        with pytest.raises(http.client.IncompleteRead) as excinfo:
+            response.read()
+    assert excinfo.value.partial == DATA[:10]
+
+
+def test_cut_only_affects_the_configured_path(http_server):
+    http_server.serve("/a.bin", DATA)
+    other = http_server.serve("/b.bin", DATA)
+    http_server.cut_connection_after("/a.bin", 10)
+    with fetch(other) as response:
+        assert response.read() == DATA
+
+
+def flipped(data):
+    return bytes(byte ^ 0xFF for byte in data)
+
+
+def test_chosen_chunk_is_corrupted(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.corrupt_range("/file.bin", 256, 512)
+    with fetch(url, {"Range": "bytes=256-511"}) as response:
+        body = response.read()
+    assert len(body) == 256
+    assert body != DATA[256:512]
+    assert body == flipped(DATA[256:512])
+
+
+def test_other_chunks_are_not_corrupted(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.corrupt_range("/file.bin", 256, 512)
+    with fetch(url, {"Range": "bytes=0-255"}) as response:
+        assert response.read() == DATA[:256]
+    with fetch(url, {"Range": "bytes=512-1023"}) as response:
+        assert response.read() == DATA[512:]
+
+
+def test_corruption_only_changes_the_overlap_with_the_request(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    http_server.corrupt_range("/file.bin", 256, 512)
+    with fetch(url, {"Range": "bytes=200-299"}) as response:
+        body = response.read()
+    assert body[:56] == DATA[200:256]
+    assert body[56:] == flipped(DATA[256:300])
+
+
+# --- Request log (T23) ---
+
+
+def test_request_log_records_range_headers_in_order(http_server):
+    url = http_server.serve("/file.bin", DATA)
+    for header in ("bytes=0-9", "bytes=10-19"):
+        with fetch(url, {"Range": header}) as response:
+            response.read()
+    with fetch(url) as response:
+        response.read()
+    assert [(r.path, r.range) for r in http_server.requests] == [
+        ("/file.bin", "bytes=0-9"),
+        ("/file.bin", "bytes=10-19"),
+        ("/file.bin", None),
+    ]
+
+
+def test_request_log_records_other_headers_and_missing_paths(http_server):
+    with pytest.raises(urllib.error.HTTPError):
+        fetch(http_server.url("/missing"), {"X-Test": "1"})
+    (record,) = http_server.requests
+    assert record.path == "/missing"
+    assert record.headers["X-Test"] == "1"

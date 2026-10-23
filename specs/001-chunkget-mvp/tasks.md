@@ -169,7 +169,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `tests/helpers/http_server.py`: servidor `http.server` en `127.0.0.1`, puerto efímero, que sirve bytes y responde `206` con `Content-Range` a peticiones con `Range`, y fixture de pytest.
   - Hecho cuando: un test usa `urllib` contra el servidor y comprueba que un `Range: bytes=2-5` devuelve estado 206, 4 bytes y un `Content-Range` correcto, y que el servidor se cierra al terminar el test.
 
-- [ ] **T23 — Fallos de datos inyectables**
+- [x] **T23 — Fallos de datos inyectables**
   - RF/RNF: constitución §4, caso «corte de red»
   - Depende de: T22
   - El servidor puede, por configuración: cortar la conexión tras N bytes, corromper un fragmento concreto y registrar las peticiones recibidas.
