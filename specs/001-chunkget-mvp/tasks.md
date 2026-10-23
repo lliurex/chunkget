@@ -227,7 +227,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 6 — Almacenamiento
 
-- [ ] **T32 — Comprobación de espacio**
+- [x] **T32 — Comprobación de espacio**
   - RF/RNF: caso «no hay espacio»
   - Depende de: T04
   - `storage.check_free_space(directory, needed)` con `shutil.disk_usage`.
