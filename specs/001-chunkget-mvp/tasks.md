@@ -181,7 +181,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - El servidor puede: ignorar `Range` (devolver 200), devolver otro total en `Content-Range`, añadir `Content-Encoding: gzip`, responder una secuencia de códigos (404, 429, 503…) y redirigir a otro esquema.
   - Hecho cuando: tests comprueban cada comportamiento con `urllib` o `http.client`.
 
-- [ ] **T25 — Validación de URL y redirecciones**
+- [x] **T25 — Validación de URL y redirecciones**
   - RF/RNF: D5, RF4
   - Depende de: T04
   - `http.py`: función que rechaza esquemas distintos de `http`/`https` y *handler* de redirecciones que rechaza redirigir a otros esquemas.
