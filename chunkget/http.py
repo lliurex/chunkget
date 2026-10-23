@@ -9,10 +9,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from chunkget import __version__
+from chunkget import __version__, config
 from chunkget.errors import (
     ChunkgetError,
     ExitCode,
+    FilesystemError,
     ManifestInvalidError,
     NetworkError,
     ServerIncompatibleError,
@@ -268,6 +269,20 @@ def _check_range_response(response, start, end, total):
         )
 
 
+def _source_error(url, error):
+    """Translate a failure of a plain request into a ``SourceError``."""
+    if isinstance(error, urllib.error.HTTPError):
+        return SourceError(
+            _("cannot fetch {url}: HTTP error {status}").format(
+                url=url, status=error.code
+            )
+        )
+    reason = getattr(error, "reason", None) or error
+    return SourceError(
+        _("cannot fetch {url}: {reason}").format(url=url, reason=reason)
+    )
+
+
 def fetch_bytes(url, max_bytes, timeout):
     """Read a small resource into memory.
 
@@ -283,20 +298,61 @@ def fetch_bytes(url, max_bytes, timeout):
             # read(n) does not raise IncompleteRead when the body is cut.
             if length is not None and length.isdigit() and len(data) < int(length):
                 raise http.client.IncompleteRead(data, int(length) - len(data))
-    except urllib.error.HTTPError as error:
-        raise SourceError(
-            _("cannot fetch {url}: HTTP error {status}").format(
-                url=url, status=error.code
-            )
-        ) from None
     except (OSError, http.client.HTTPException) as error:
-        reason = getattr(error, "reason", None) or error
-        raise SourceError(
-            _("cannot fetch {url}: {reason}").format(url=url, reason=reason)
-        ) from None
+        raise _source_error(url, error) from None
     if len(data) > max_bytes:
         raise _too_large(max_bytes)
     return data
+
+
+def simple_download(url, path, timeout):
+    """GET ``url`` straight into ``path`` (no temporary file).
+
+    Failures to reach the source are ``SourceError``; a body cut short is a
+    ``RetryableError`` and the partial file stays where it is.
+    """
+    try:
+        response = open_url(url, timeout)
+    except (OSError, http.client.HTTPException) as error:
+        raise _source_error(url, error) from None
+    with response:
+        length = response.headers.get("Content-Length")
+        try:
+            handle = open(path, "wb")
+        except OSError as error:
+            raise _write_error(path, error) from None
+        written = 0
+        with handle:
+            while True:
+                try:
+                    block = response.read(config.BUFFER_SIZE)
+                except (OSError, http.client.HTTPException) as error:
+                    raise RetryableError(
+                        _("connection failed while downloading {url}: {reason}").format(
+                            url=url, reason=error
+                        )
+                    ) from None
+                if not block:
+                    break
+                try:
+                    handle.write(block)
+                except OSError as error:
+                    raise _write_error(path, error) from None
+                written += len(block)
+    if length is not None and length.isdigit() and written < int(length):
+        raise RetryableError(
+            _("incomplete download of {url}: received {received} of {expected} bytes").format(
+                url=url, received=written, expected=int(length)
+            )
+        )
+
+
+def _write_error(path, error):
+    return FilesystemError(
+        _("cannot write {path}: {reason}").format(
+            path=path, reason=error.strerror or error
+        )
+    )
 
 
 def _too_large(max_bytes):

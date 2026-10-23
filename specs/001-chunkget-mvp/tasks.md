@@ -211,7 +211,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Valida estado 206, `Content-Range` exacto con el total esperado, `Content-Encoding` y longitud recibida.
   - Hecho cuando: tests comprueban que: respuesta 200 → `ServerIncompatibleError` (11); total distinto → 11; `Content-Encoding: gzip` → 11; 404 → `NetworkError` (6); 503 y corte a mitad → error reintentable.
 
-- [ ] **T30 — Descarga simple a fichero**
+- [x] **T30 — Descarga simple a fichero**
   - RF/RNF: RF3, D4
   - Depende de: T27
   - `simple_download(url, path, timeout)`: GET en streaming directamente a la ruta indicada, sin fichero temporal.

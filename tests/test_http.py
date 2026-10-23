@@ -456,3 +456,147 @@ def test_timeout_is_retryable():
 
 def test_retryable_error_is_a_network_error():
     assert issubclass(RetryableError, NetworkError)
+
+
+# --- simple_download (T30) ---
+
+import os
+
+from chunkget import config
+from chunkget.errors import FilesystemError
+
+
+def big_data(size):
+    return bytes((index * 31 + 7) % 251 for index in range(size))
+
+
+def test_simple_download_writes_the_file(http_server, tmp_path):
+    data = big_data(2 * config.BUFFER_SIZE + 12345)
+    url = http_server.serve("/image.iso", data)
+    destination = tmp_path / "image.iso"
+    http.simple_download(url, destination, 5)
+    assert destination.read_bytes() == data
+
+
+def test_simple_download_of_an_empty_resource(http_server, tmp_path):
+    url = http_server.serve("/empty", b"")
+    destination = tmp_path / "empty"
+    http.simple_download(url, destination, 5)
+    assert destination.read_bytes() == b""
+
+
+def test_simple_download_replaces_an_existing_file(http_server, tmp_path):
+    url = http_server.serve("/f", b"new")
+    destination = tmp_path / "f"
+    destination.write_bytes(b"old content that is longer")
+    http.simple_download(url, destination, 5)
+    assert destination.read_bytes() == b"new"
+
+
+class ListingResponse:
+    """Wraps a response and records the directory contents on every read."""
+
+    def __init__(self, response, directory, listings):
+        self._response = response
+        self.headers = response.headers
+        self._directory = directory
+        self._listings = listings
+
+    def read(self, size=-1):
+        self._listings.append(sorted(os.listdir(self._directory)))
+        return self._response.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self._response.close()
+
+
+def test_only_the_destination_file_exists_while_downloading(
+    http_server, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config, "BUFFER_SIZE", 1000)
+    data = big_data(5500)
+    url = http_server.serve("/image.iso", data)
+    listings = []
+    real_open_url = http.open_url
+    monkeypatch.setattr(
+        http,
+        "open_url",
+        lambda *args, **kwargs: ListingResponse(
+            real_open_url(*args, **kwargs), tmp_path, listings
+        ),
+    )
+    http.simple_download(url, tmp_path / "image.iso", 5)
+    assert len(listings) >= 5
+    assert all(listing == ["image.iso"] for listing in listings)
+    assert sorted(os.listdir(tmp_path)) == ["image.iso"]
+    assert (tmp_path / "image.iso").read_bytes() == data
+
+
+def test_simple_download_reads_in_buffer_sized_blocks(
+    http_server, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config, "BUFFER_SIZE", 1000)
+    url = http_server.serve("/f", big_data(5500))
+    sizes = []
+    real_open_url = http.open_url
+
+    class Recording(ListingResponse):
+        def read(self, size=-1):
+            sizes.append(size)
+            return self._response.read(size)
+
+    monkeypatch.setattr(
+        http,
+        "open_url",
+        lambda *a, **k: Recording(real_open_url(*a, **k), tmp_path, []),
+    )
+    http.simple_download(url, tmp_path / "f", 5)
+    assert sizes and all(size == 1000 for size in sizes)
+
+
+def test_http_error_is_a_source_error_and_creates_no_file(http_server, tmp_path):
+    destination = tmp_path / "missing"
+    with pytest.raises(SourceError):
+        http.simple_download(http_server.url("/missing"), destination, 5)
+    assert os.listdir(tmp_path) == []
+
+
+def test_http_error_keeps_an_existing_file(http_server, tmp_path):
+    destination = tmp_path / "keep"
+    destination.write_bytes(b"precious")
+    with pytest.raises(SourceError):
+        http.simple_download(http_server.url("/missing"), destination, 5)
+    assert destination.read_bytes() == b"precious"
+
+
+def test_simple_download_rejects_other_schemes(tmp_path):
+    with pytest.raises(SourceError):
+        http.simple_download("file:///etc/passwd", tmp_path / "x", 5)
+    assert os.listdir(tmp_path) == []
+
+
+def test_cut_connection_is_a_retryable_error(http_server, tmp_path):
+    url = http_server.serve("/f", big_data(5000))
+    http_server.cut_connection_after("/f", 1500)
+    destination = tmp_path / "f"
+    with pytest.raises(RetryableError):
+        http.simple_download(url, destination, 5)
+    # The partial content stays, so that the download can be resumed.
+    assert destination.read_bytes() == big_data(5000)[:1500]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_unwritable_destination_is_a_filesystem_error(http_server, tmp_path):
+    url = http_server.serve("/f", b"data")
+    directory = tmp_path / "readonly"
+    directory.mkdir()
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError) as excinfo:
+            http.simple_download(url, directory / "f", 5)
+        assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+    finally:
+        directory.chmod(0o700)
