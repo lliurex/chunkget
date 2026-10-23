@@ -300,7 +300,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 8 — Orquestación de la descarga
 
-- [ ] **T43 — Resolver el manifest de la descarga (ruta o URL)**
+- [x] **T43 — Resolver el manifest de la descarga (ruta o URL)**
   - RF/RNF: RF6, RF7
   - Depende de: T18, T27
   - `downloader.py`: distingue ruta local de URL `http(s)` por esquema y devuelve un `Manifest` validado.
