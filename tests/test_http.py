@@ -291,3 +291,55 @@ def test_fetch_bytes_truncated_body_is_a_source_error(http_server):
 def test_fetch_bytes_rejects_other_schemes():
     with pytest.raises(SourceError):
         http.fetch_bytes("file:///etc/passwd", LIMIT, 5)
+
+
+# --- open_range: successful request (T28) ---
+
+import chunkget
+
+RANGE_DATA = bytes(range(256)) * 4
+
+
+def test_open_range_delivers_the_requested_bytes(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    with http.open_range(url, 100, 200, 5) as stream:
+        assert stream.read() == RANGE_DATA[100:200]
+
+
+def test_open_range_can_be_read_in_blocks(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    with http.open_range(url, 0, 1024, 5) as stream:
+        blocks = []
+        while True:
+            block = stream.read(100)
+            if not block:
+                break
+            blocks.append(block)
+    assert b"".join(blocks) == RANGE_DATA
+    assert max(len(block) for block in blocks) <= 100
+
+
+def test_open_range_sends_the_expected_headers(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    with http.open_range(url, 100, 200, 5) as stream:
+        stream.read()
+    (record,) = http_server.requests
+    assert record.path == "/file.bin"
+    assert record.headers["Range"] == "bytes=100-199"
+    assert record.headers["Accept-Encoding"] == "identity"
+    assert record.headers["User-Agent"] == "chunkget/" + chunkget.__version__
+    # Only the connection headers added by http.client come on top.
+    extra = set(record.headers) - {"Range", "Accept-Encoding", "User-Agent"}
+    assert extra <= {"Host", "Connection"}
+
+
+def test_open_range_first_byte_only(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    with http.open_range(url, 0, 1, 5) as stream:
+        assert stream.read() == RANGE_DATA[:1]
+    assert http_server.requests[0].headers["Range"] == "bytes=0-0"
+
+
+def test_open_range_rejects_invalid_urls():
+    with pytest.raises(SourceError):
+        http.open_range("file:///etc/passwd", 0, 10, 5)

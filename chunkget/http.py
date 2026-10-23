@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from chunkget import __version__
 from chunkget.errors import ExitCode, ManifestInvalidError, SourceError
 from chunkget.i18n import _
 
@@ -62,9 +63,27 @@ def build_opener():
     return opener
 
 
-def open_url(url, timeout):
+def open_url(url, timeout, headers=None):
     """Open a validated http(s) URL and return the response."""
-    return build_opener().open(validate_url(url), timeout=timeout)
+    request = urllib.request.Request(validate_url(url), headers=headers or {})
+    return build_opener().open(request, timeout=timeout)
+
+
+def open_range(url, start, end, timeout):
+    """Request the bytes ``start`` (inclusive) to ``end`` (exclusive) of ``url``.
+
+    Returns the response as a stream. Checking that the answer is the
+    expected partial content is up to the caller.
+    """
+    return open_url(
+        url,
+        timeout,
+        headers={
+            "Range": "bytes=%d-%d" % (start, end - 1),
+            "Accept-Encoding": "identity",
+            "User-Agent": "chunkget/" + __version__,
+        },
+    )
 
 
 class ErrorKind(enum.Enum):

@@ -199,7 +199,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `fetch_bytes(url, max_bytes, timeout)` con tope de 64 MiB.
   - Hecho cuando: tests contra el servidor comprueban que devuelve el contenido, que un recurso mayor que el tope lanza `ManifestInvalidError`, que un 404 lanza `SourceError` (código 3) y que un timeout lanza `SourceError`.
 
-- [ ] **T28 — Petición de un rango: caso correcto**
+- [x] **T28 — Petición de un rango: caso correcto**
   - RF/RNF: RF7, RF9
   - Depende de: T25, T26, T22
   - `open_range(url, start, end, timeout)` envía `Range: bytes=start-(end-1)`, `Accept-Encoding: identity` y `User-Agent: chunkget/<versión>`, y entrega un flujo.
