@@ -1,32 +1,18 @@
 """The destination file: free space, preallocation and writing."""
 
-import contextlib
 import errno
 import os
 import shutil
 from pathlib import Path
 
 from chunkget import config, hashing
-from chunkget.errors import FilesystemError, NoSpaceError
+from chunkget.errors import NoSpaceError, filesystem_errors
 from chunkget.i18n import _
-
-
-@contextlib.contextmanager
-def _filesystem_errors(path):
-    """Turn an OSError (permissions, full disk...) into a FilesystemError."""
-    try:
-        yield
-    except OSError as error:
-        raise FilesystemError(
-            _("filesystem error on {path}: {reason}").format(
-                path=path, reason=error.strerror or error
-            )
-        ) from None
 
 
 def check_free_space(directory, needed):
     """Raise NoSpaceError if ``directory`` has fewer than ``needed`` free bytes."""
-    with _filesystem_errors(directory):
+    with filesystem_errors(directory):
         free = shutil.disk_usage(directory).free
     if free < needed:
         raise NoSpaceError(
@@ -39,7 +25,7 @@ def check_free_space(directory, needed):
 
 def bytes_needed(destination, size):
     """Extra bytes required to make ``destination`` ``size`` bytes long."""
-    with _filesystem_errors(destination):
+    with filesystem_errors(destination):
         try:
             current = os.path.getsize(destination)
         except FileNotFoundError:
@@ -65,7 +51,7 @@ def prepare_destination(path, size):
     truncated to size (sparse). Existing content below ``size`` is kept.
     """
     check_destination_space(path, size)
-    with _filesystem_errors(path):
+    with filesystem_errors(path):
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
         try:
             if size > 0 and hasattr(os, "posix_fallocate"):
@@ -90,10 +76,10 @@ def write_chunk(path, start, stream, length, algorithm=config.DEFAULT_ALGORITHM)
     caller sees a hash mismatch.
     """
     hasher = hashing.Hasher(algorithm)
-    with _filesystem_errors(path):
+    with filesystem_errors(path):
         handle = open(path, "r+b")
     try:
-        with _filesystem_errors(path):
+        with filesystem_errors(path):
             handle.seek(start)
         remaining = length
         while remaining > 0:
@@ -101,14 +87,14 @@ def write_chunk(path, start, stream, length, algorithm=config.DEFAULT_ALGORITHM)
             block = stream.read(min(config.BUFFER_SIZE, remaining))
             if not block:
                 break
-            with _filesystem_errors(path):
+            with filesystem_errors(path):
                 handle.write(block)
             hasher.update(block)
             remaining -= len(block)
-        with _filesystem_errors(path):
+        with filesystem_errors(path):
             handle.flush()
             os.fsync(handle.fileno())
     finally:
-        with _filesystem_errors(path):
+        with filesystem_errors(path):
             handle.close()
     return hashing.format_hash(algorithm, hasher.hexdigest())

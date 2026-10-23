@@ -1,6 +1,9 @@
 """Process exit codes and the exception hierarchy."""
 
+import contextlib
 import enum
+
+from chunkget.i18n import _
 
 
 class ExitCode(enum.IntEnum):
@@ -97,3 +100,16 @@ class InterruptedByUser(ChunkgetError):
         super().__init__(message)
         if exit_code is not None:
             self.exit_code = exit_code
+
+
+@contextlib.contextmanager
+def filesystem_errors(path):
+    """Turn an OSError (permissions, full disk...) into a FilesystemError."""
+    try:
+        yield
+    except OSError as error:
+        raise FilesystemError(
+            _("filesystem error on {path}: {reason}").format(
+                path=path, reason=error.strerror or error
+            )
+        ) from None
