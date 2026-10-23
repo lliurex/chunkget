@@ -5,6 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
+from chunkget import config, hashing
 from chunkget.errors import NoSpaceError
 from chunkget.i18n import _
 
@@ -60,3 +61,28 @@ def prepare_destination(path, size):
         os.ftruncate(fd, size)
     finally:
         os.close(fd)
+
+
+def write_chunk(path, start, stream, length, algorithm=config.DEFAULT_ALGORITHM):
+    """Write up to ``length`` bytes of ``stream`` into ``path`` at ``start``.
+
+    The destination must already exist at its final size. Data is written in
+    blocks of ``config.BUFFER_SIZE`` while it is hashed, then flushed and
+    synced to disk. Returns the hash of what was written as ``algorithm:hex``.
+    If the stream ends early only what arrived is written and hashed, so the
+    caller sees a hash mismatch.
+    """
+    hasher = hashing.Hasher(algorithm)
+    with open(path, "r+b") as handle:
+        handle.seek(start)
+        remaining = length
+        while remaining > 0:
+            block = stream.read(min(config.BUFFER_SIZE, remaining))
+            if not block:
+                break
+            handle.write(block)
+            hasher.update(block)
+            remaining -= len(block)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return hashing.format_hash(algorithm, hasher.hexdigest())

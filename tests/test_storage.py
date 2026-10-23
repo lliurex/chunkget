@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from chunkget import storage
-from chunkget.errors import ExitCode, NoSpaceError
+from chunkget.errors import ExitCode, NoSpaceError, UsageError
 
 Usage = collections.namedtuple("Usage", "total used free")
 
@@ -199,4 +199,131 @@ def test_prepare_counts_the_current_size_of_an_existing_file(free_space, tmp_pat
     destination.write_bytes(b"x" * 60)
     free_space["free"] = 40
     storage.prepare_destination(destination, 100)
+    assert destination.stat().st_size == 100
+
+
+# --- write_chunk (T34) ---
+
+import hashlib
+import io
+
+from chunkget import config
+
+
+class RecordingStream(io.BytesIO):
+    def __init__(self, data):
+        super().__init__(data)
+        self.read_sizes = []
+
+    def read(self, size=-1):
+        self.read_sizes.append(size)
+        return super().read(size)
+
+
+def make_file(tmp_path, size, fill=b"\0"):
+    destination = tmp_path / "image.iso"
+    destination.write_bytes(fill * size)
+    return destination
+
+
+def chunk_data(length, seed=1):
+    return bytes((index * 13 + seed) % 251 for index in range(length))
+
+
+def test_write_chunk_changes_only_the_bytes_of_that_position(tmp_path):
+    destination = make_file(tmp_path, 300, fill=b"x")
+    data = chunk_data(100)
+    storage.write_chunk(destination, 100, io.BytesIO(data), 100)
+    content = destination.read_bytes()
+    assert content[:100] == b"x" * 100
+    assert content[100:200] == data
+    assert content[200:] == b"x" * 100
+    assert len(content) == 300
+
+
+def test_write_chunk_of_the_shorter_last_chunk(tmp_path):
+    destination = make_file(tmp_path, 250)
+    data = chunk_data(50)
+    storage.write_chunk(destination, 200, io.BytesIO(data), 50)
+    assert destination.read_bytes() == b"\0" * 200 + data
+
+
+def test_write_chunk_returns_the_hash_of_what_it_wrote(tmp_path):
+    destination = make_file(tmp_path, 300)
+    data = chunk_data(100)
+    result = storage.write_chunk(destination, 100, io.BytesIO(data), 100)
+    assert result == "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def test_write_chunk_uses_the_requested_algorithm(tmp_path):
+    destination = make_file(tmp_path, 100)
+    data = chunk_data(100)
+    result = storage.write_chunk(
+        destination, 0, io.BytesIO(data), 100, algorithm="sha3_512"
+    )
+    assert result == "sha3_512:" + hashlib.sha3_512(data).hexdigest()
+
+
+def test_write_chunk_rejects_an_unsupported_algorithm(tmp_path):
+    destination = make_file(tmp_path, 100)
+    with pytest.raises(UsageError):
+        storage.write_chunk(
+            destination, 0, io.BytesIO(chunk_data(100)), 100, algorithm="md5"
+        )
+
+
+def test_write_chunk_flushes_and_syncs_to_disk(tmp_path, monkeypatch):
+    destination = make_file(tmp_path, 100)
+    data = chunk_data(100)
+    synced = []
+
+    def fake_fsync(fd):
+        # Everything must already be visible in the file when fsync is called.
+        with open(destination, "rb") as reader:
+            synced.append(reader.read())
+
+    monkeypatch.setattr(storage.os, "fsync", fake_fsync)
+    storage.write_chunk(destination, 0, io.BytesIO(data), 100)
+    assert synced == [data]
+
+
+def test_write_chunk_works_in_blocks_of_the_buffer_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BUFFER_SIZE", 30)
+    destination = make_file(tmp_path, 100)
+    data = chunk_data(100)
+    stream = RecordingStream(data)
+    result = storage.write_chunk(destination, 0, stream, 100)
+    assert stream.read_sizes == [30, 30, 30, 10]
+    assert destination.read_bytes() == data
+    assert result == "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def test_write_chunk_does_not_read_beyond_the_length(tmp_path):
+    destination = make_file(tmp_path, 100)
+    stream = io.BytesIO(chunk_data(500))
+    storage.write_chunk(destination, 0, stream, 100)
+    assert stream.tell() == 100
+    assert destination.read_bytes() == chunk_data(500)[:100]
+
+
+def test_write_chunk_with_a_short_stream_hashes_what_arrived(tmp_path):
+    destination = make_file(tmp_path, 100)
+    data = chunk_data(40)
+    result = storage.write_chunk(destination, 0, io.BytesIO(data), 100)
+    assert result == "sha256:" + hashlib.sha256(data).hexdigest()
+    assert destination.read_bytes() == data + b"\0" * 60
+
+
+def test_write_chunk_of_length_zero(tmp_path):
+    destination = make_file(tmp_path, 10)
+    stream = RecordingStream(b"abc")
+    result = storage.write_chunk(destination, 0, stream, 0)
+    assert result == "sha256:" + hashlib.sha256(b"").hexdigest()
+    assert stream.read_sizes == []
+    assert destination.read_bytes() == b"\0" * 10
+
+
+def test_write_chunk_does_not_change_the_file_size(tmp_path):
+    destination = make_file(tmp_path, 100)
+    storage.write_chunk(destination, 90, io.BytesIO(chunk_data(10)), 10)
     assert destination.stat().st_size == 100

@@ -239,7 +239,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `storage.prepare_destination(path, size)`: crea o extiende el fichero al tamaño exacto, con `os.posix_fallocate` y, si no está soportado, con truncado.
   - Hecho cuando: tests comprueban que el fichero resultante mide `size` (incluido `size = 0`) y que, con `posix_fallocate` simulado como no soportado, se usa el truncado y el tamaño sigue siendo el correcto.
 
-- [ ] **T34 — Escritura de un fragmento en su posición**
+- [x] **T34 — Escritura de un fragmento en su posición**
   - RF/RNF: RF7, RF9
   - Depende de: T33, T12
   - `storage.write_chunk(path, start, stream, length)` escribe en bloques de 1 MiB en `start`, calcula el hash mientras escribe, hace `flush` y `os.fsync`, y devuelve el hash.
