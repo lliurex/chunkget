@@ -206,3 +206,77 @@ def test_destination_must_be_an_absolute_path(tmp_path, destination):
 
 def test_state_of_another_manifest_is_rejected(tmp_path):
     assert_invalid(lambda: load(tmp_path, manifest_id="sha256:" + "0" * 64))
+
+
+# --- state_key (T38) ---
+
+import hashlib
+import re
+
+HASH_A = "sha256:" + "a" * 64
+HASH_B = "sha256:" + "b" * 64
+
+
+def test_state_key_is_32_lowercase_hex_characters(tmp_path):
+    key = state.state_key(HASH_A, tmp_path / "image.iso")
+    assert re.fullmatch(r"[0-9a-f]{32}", key)
+
+
+def test_state_key_follows_the_formula_of_the_plan(tmp_path):
+    destination = tmp_path / "image.iso"
+    expected = hashlib.sha256(
+        (HASH_A + "\0" + str(destination)).encode("utf-8")
+    ).hexdigest()[:32]
+    assert state.state_key(HASH_A, destination) == expected
+
+
+def test_state_key_is_deterministic(tmp_path):
+    destination = tmp_path / "image.iso"
+    assert state.state_key(HASH_A, destination) == state.state_key(HASH_A, destination)
+
+
+def test_state_key_changes_with_the_manifest(tmp_path):
+    destination = tmp_path / "image.iso"
+    assert state.state_key(HASH_A, destination) != state.state_key(HASH_B, destination)
+
+
+def test_state_key_changes_with_the_destination(tmp_path):
+    assert state.state_key(HASH_A, tmp_path / "a.iso") != state.state_key(
+        HASH_A, tmp_path / "b.iso"
+    )
+
+
+def test_manifest_id_and_destination_are_not_interchangeable():
+    assert state.state_key("ab", "/c") != state.state_key("a", "/bc")
+
+
+def test_relative_destination_is_normalised_to_an_absolute_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    assert state.state_key(HASH_A, "image.iso") == state.state_key(
+        HASH_A, tmp_path / "image.iso"
+    )
+    assert state.state_key(HASH_A, "./image.iso") == state.state_key(
+        HASH_A, tmp_path / "image.iso"
+    )
+
+
+def test_equivalent_spellings_of_a_path_give_the_same_key(tmp_path):
+    reference = state.state_key(HASH_A, tmp_path / "image.iso")
+    assert state.state_key(HASH_A, str(tmp_path) + "//image.iso") == reference
+    assert state.state_key(HASH_A, tmp_path / "sub" / ".." / "image.iso") == reference
+
+
+def test_state_key_accepts_names_that_are_not_valid_utf8(tmp_path):
+    key = state.state_key(HASH_A, os.fsdecode(os.fsencode(tmp_path) + b"/\xff.iso"))
+    assert re.fullmatch(r"[0-9a-f]{32}", key)
+
+
+def test_state_key_matches_the_destination_stored_in_a_new_state(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    manifest = make_manifest(tmp_path)
+    new = state.new_state(manifest, "image.iso")
+    assert state.state_key(manifest.global_hash, "image.iso") == state.state_key(
+        new.manifest_id, new.destination
+    )

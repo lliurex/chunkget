@@ -266,7 +266,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T36
   - Hecho cuando: tests comprueban que `StateInvalidError` (13) se lanza con: JSON inválido, `state_version` desconocida, longitud de `chunk_states` distinta del nº de fragmentos, carácter fuera de `P`/`C`/`F` y `status` desconocido.
 
-- [ ] **T38 — Clave del estado**
+- [x] **T38 — Clave del estado**
   - RF/RNF: RF8, RF1.4
   - Depende de: T36
   - `state_key(manifest_id, destination)` según la sección 5 (32 hex de `sha256`).

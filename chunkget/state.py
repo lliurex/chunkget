@@ -1,6 +1,7 @@
 """The state file of a download (plan section 5)."""
 
 import dataclasses
+import hashlib
 import json
 import os
 
@@ -30,6 +31,16 @@ class State:
 
     def to_json(self):
         return json.dumps(dataclasses.asdict(self), indent=2, ensure_ascii=False) + "\n"
+
+
+def state_key(manifest_id, destination):
+    """Name of the state of a manifest downloaded to ``destination``.
+
+    The first 32 hexadecimal characters of
+    ``sha256(manifest_id + "\\0" + absolute destination)``.
+    """
+    text = manifest_id + "\0" + os.path.abspath(destination)
+    return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()[:32]
 
 
 def new_state(manifest, destination):
