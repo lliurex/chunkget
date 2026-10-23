@@ -10,7 +10,14 @@ import urllib.parse
 import urllib.request
 
 from chunkget import __version__
-from chunkget.errors import ExitCode, ManifestInvalidError, SourceError
+from chunkget.errors import (
+    ChunkgetError,
+    ExitCode,
+    ManifestInvalidError,
+    NetworkError,
+    ServerIncompatibleError,
+    SourceError,
+)
 from chunkget.i18n import _
 
 ALLOWED_SCHEMES = ("http", "https")
@@ -67,23 +74,6 @@ def open_url(url, timeout, headers=None):
     """Open a validated http(s) URL and return the response."""
     request = urllib.request.Request(validate_url(url), headers=headers or {})
     return build_opener().open(request, timeout=timeout)
-
-
-def open_range(url, start, end, timeout):
-    """Request the bytes ``start`` (inclusive) to ``end`` (exclusive) of ``url``.
-
-    Returns the response as a stream. Checking that the answer is the
-    expected partial content is up to the caller.
-    """
-    return open_url(
-        url,
-        timeout,
-        headers={
-            "Range": "bytes=%d-%d" % (start, end - 1),
-            "Accept-Encoding": "identity",
-            "User-Agent": "chunkget/" + __version__,
-        },
-    )
 
 
 class ErrorKind(enum.Enum):
@@ -148,6 +138,134 @@ def classify_range_response(status, content_range, expected_total, content_encod
     if content_encoding and content_encoding.strip().lower() != "identity":
         return ErrorKind.INCOMPATIBLE
     return None
+
+
+class RetryableError(NetworkError):
+    """A transient failure: the same request may succeed if repeated."""
+
+
+_EXCEPTION_CLASSES = {
+    ErrorKind.RETRYABLE: RetryableError,
+    ErrorKind.FATAL: NetworkError,
+    ErrorKind.INCOMPATIBLE: ServerIncompatibleError,
+    ErrorKind.SOURCE: SourceError,
+}
+
+
+def _exception_for(kind, text):
+    """Build the exception for an ``ErrorKind``.
+
+    ``text`` must already be translated: every caller passes ``_("...")``.
+    """
+    return _EXCEPTION_CLASSES[kind](text)
+
+
+class RangeStream:
+    """The body of a ranged response, checked against the expected length."""
+
+    def __init__(self, response, expected_length):
+        self._response = response
+        self._expected = expected_length
+        self._received = 0
+
+    def read(self, size=-1):
+        try:
+            data = self._response.read(size)
+        except (OSError, http.client.HTTPException) as error:
+            raise _exception_for(
+                classify_exception(error),
+                _("connection failed while receiving data: {reason}").format(
+                    reason=error
+                ),
+            ) from None
+        self._received += len(data)
+        if self._received > self._expected:
+            raise ServerIncompatibleError(
+                _("the server sent more data than the {expected} bytes requested").format(
+                    expected=self._expected
+                )
+            )
+        # read(n) does not raise when the connection is cut: check at EOF.
+        if (not data or size is None or size < 0) and self._received < self._expected:
+            raise RetryableError(
+                _("incomplete data: received {received} of {expected} bytes").format(
+                    received=self._received, expected=self._expected
+                )
+            )
+        return data
+
+    def close(self):
+        self._response.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
+
+def open_range(url, start, end, timeout, *, total):
+    """Request the bytes ``start`` (inclusive) to ``end`` (exclusive) of ``url``.
+
+    ``total`` is the size of the whole resource according to the manifest.
+    Returns a stream of exactly ``end - start`` bytes. Errors are classified:
+    ``ServerIncompatibleError`` if the server does not honour the range,
+    ``RetryableError`` for transient failures and ``NetworkError`` for the rest.
+    """
+    try:
+        response = open_url(
+            url,
+            timeout,
+            headers={
+                "Range": "bytes=%d-%d" % (start, end - 1),
+                "Accept-Encoding": "identity",
+                "User-Agent": "chunkget/" + __version__,
+            },
+        )
+    except ChunkgetError:
+        raise
+    except urllib.error.HTTPError as error:
+        raise _exception_for(
+            classify_status(error.code) or ErrorKind.FATAL,
+            _("HTTP error {status} while requesting {url}").format(
+                status=error.code, url=url
+            ),
+        ) from None
+    except (OSError, http.client.HTTPException) as error:
+        reason = getattr(error, "reason", None) or error
+        raise _exception_for(
+            classify_exception(error),
+            _("cannot connect to {url}: {reason}").format(url=url, reason=reason),
+        ) from None
+    try:
+        _check_range_response(response, start, end, total)
+    except BaseException:
+        response.close()
+        raise
+    return RangeStream(response, end - start)
+
+
+def _check_range_response(response, start, end, total):
+    content_range = response.headers.get("Content-Range")
+    encoding = response.headers.get("Content-Encoding")
+    kind = classify_range_response(response.status, content_range, total, encoding)
+    expected = "bytes %d-%d/%d" % (start, end - 1, total)
+    if kind is None and content_range != expected:
+        kind = ErrorKind.INCOMPATIBLE
+    if kind is not None:
+        raise _exception_for(
+            kind,
+            _(
+                "unexpected response from the server: HTTP {status}, "
+                "Content-Range {content_range!r} (expected {expected!r}), "
+                "Content-Encoding {encoding!r}"
+            ).format(
+                status=response.status,
+                content_range=content_range,
+                expected=expected,
+                encoding=encoding,
+            ),
+        )
 
 
 def fetch_bytes(url, max_bytes, timeout):

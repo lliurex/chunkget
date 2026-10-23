@@ -302,13 +302,13 @@ RANGE_DATA = bytes(range(256)) * 4
 
 def test_open_range_delivers_the_requested_bytes(http_server):
     url = http_server.serve("/file.bin", RANGE_DATA)
-    with http.open_range(url, 100, 200, 5) as stream:
+    with http.open_range(url, 100, 200, 5, total=1024) as stream:
         assert stream.read() == RANGE_DATA[100:200]
 
 
 def test_open_range_can_be_read_in_blocks(http_server):
     url = http_server.serve("/file.bin", RANGE_DATA)
-    with http.open_range(url, 0, 1024, 5) as stream:
+    with http.open_range(url, 0, 1024, 5, total=1024) as stream:
         blocks = []
         while True:
             block = stream.read(100)
@@ -321,7 +321,7 @@ def test_open_range_can_be_read_in_blocks(http_server):
 
 def test_open_range_sends_the_expected_headers(http_server):
     url = http_server.serve("/file.bin", RANGE_DATA)
-    with http.open_range(url, 100, 200, 5) as stream:
+    with http.open_range(url, 100, 200, 5, total=1024) as stream:
         stream.read()
     (record,) = http_server.requests
     assert record.path == "/file.bin"
@@ -335,11 +335,124 @@ def test_open_range_sends_the_expected_headers(http_server):
 
 def test_open_range_first_byte_only(http_server):
     url = http_server.serve("/file.bin", RANGE_DATA)
-    with http.open_range(url, 0, 1, 5) as stream:
+    with http.open_range(url, 0, 1, 5, total=1024) as stream:
         assert stream.read() == RANGE_DATA[:1]
     assert http_server.requests[0].headers["Range"] == "bytes=0-0"
 
 
 def test_open_range_rejects_invalid_urls():
     with pytest.raises(SourceError):
-        http.open_range("file:///etc/passwd", 0, 10, 5)
+        http.open_range("file:///etc/passwd", 0, 10, 5, total=1024)
+
+
+# --- open_range: validation and errors (T29) ---
+
+from chunkget.errors import NetworkError, ServerIncompatibleError
+from chunkget.http import RetryableError
+
+
+def read_range(url, start=0, end=100, total=1024, timeout=5):
+    with http.open_range(url, start, end, timeout, total=total) as stream:
+        return stream.read()
+
+
+def test_open_range_accepts_a_correct_response(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    assert read_range(url, 10, 110) == RANGE_DATA[10:110]
+
+
+def test_200_response_is_incompatible(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.ignore_range("/file.bin")
+    with pytest.raises(ServerIncompatibleError) as excinfo:
+        read_range(url)
+    assert excinfo.value.exit_code == ExitCode.SERVER_INCOMPATIBLE
+
+
+def test_different_total_is_incompatible(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.report_total("/file.bin", 2048)
+    with pytest.raises(ServerIncompatibleError):
+        read_range(url)
+
+
+def test_wrong_expected_total_is_incompatible(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    with pytest.raises(ServerIncompatibleError):
+        read_range(url, total=999)
+
+
+def test_content_encoding_is_incompatible(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.set_content_encoding("/file.bin", "gzip")
+    with pytest.raises(ServerIncompatibleError):
+        read_range(url)
+
+
+def test_404_is_a_fatal_network_error(http_server):
+    url = http_server.url("/missing")
+    with pytest.raises(NetworkError) as excinfo:
+        read_range(url)
+    assert not isinstance(excinfo.value, RetryableError)
+    assert excinfo.value.exit_code == ExitCode.NETWORK_ERROR
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+def test_retryable_statuses_raise_a_retryable_error(http_server, status):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.respond_with_statuses("/file.bin", [status])
+    with pytest.raises(RetryableError):
+        read_range(url)
+
+
+def test_cut_in_the_middle_of_the_body_is_retryable(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.cut_connection_after("/file.bin", 40)
+    with pytest.raises(RetryableError):
+        read_range(url)
+
+
+def test_cut_is_detected_when_reading_in_blocks(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.cut_connection_after("/file.bin", 40)
+    received = b""
+    with http.open_range(url, 0, 100, 5, total=1024) as stream:
+        with pytest.raises(RetryableError):
+            while True:
+                block = stream.read(30)
+                if not block:
+                    break
+                received += block
+    assert received == RANGE_DATA[:40]
+
+
+def test_empty_body_is_retryable(http_server):
+    url = http_server.serve("/file.bin", RANGE_DATA)
+    http_server.cut_connection_after("/file.bin", 0)
+    with pytest.raises(RetryableError):
+        read_range(url)
+
+
+def test_connection_refused_is_retryable():
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with pytest.raises(RetryableError):
+        read_range("http://127.0.0.1:%d/x" % port)
+
+
+def test_timeout_is_retryable():
+    import socket
+
+    with socket.socket() as silent:
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        url = "http://127.0.0.1:%d/x" % silent.getsockname()[1]
+        with pytest.raises(RetryableError):
+            read_range(url, timeout=0.2)
+
+
+def test_retryable_error_is_a_network_error():
+    assert issubclass(RetryableError, NetworkError)

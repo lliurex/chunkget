@@ -205,7 +205,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `open_range(url, start, end, timeout)` envía `Range: bytes=start-(end-1)`, `Accept-Encoding: identity` y `User-Agent: chunkget/<versión>`, y entrega un flujo.
   - Hecho cuando: un test comprueba el contenido recibido del fragmento y que el registro del servidor muestra exactamente esas tres cabeceras.
 
-- [ ] **T29 — Petición de un rango: errores**
+- [x] **T29 — Petición de un rango: errores**
   - RF/RNF: RF7, RF9, D5
   - Depende de: T28, T24, T23
   - Valida estado 206, `Content-Range` exacto con el total esperado, `Content-Encoding` y longitud recibida.
