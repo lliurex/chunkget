@@ -187,7 +187,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `http.py`: función que rechaza esquemas distintos de `http`/`https` y *handler* de redirecciones que rechaza redirigir a otros esquemas.
   - Hecho cuando: tests comprueban que `file://`, `ftp://` y una URL sin host lanzan `SourceError`, y que una redirección `http` a `file://` (servidor de pruebas) falla.
 
-- [ ] **T26 — Clasificación de errores HTTP**
+- [x] **T26 — Clasificación de errores HTTP**
   - RF/RNF: D5, RF10
   - Depende de: T04
   - Función pura que clasifica una excepción o un estado en: reintentable, fatal (código 6), incompatible (código 11) o de origen (código 3).

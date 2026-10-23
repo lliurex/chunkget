@@ -1,9 +1,15 @@
 """HTTP client built on urllib (plan D5)."""
 
+import enum
+import http.client
+import re
+import socket
+import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 
-from chunkget.errors import SourceError
+from chunkget.errors import ExitCode, SourceError
 from chunkget.i18n import _
 
 ALLOWED_SCHEMES = ("http", "https")
@@ -59,3 +65,67 @@ def build_opener():
 def open_url(url, timeout):
     """Open a validated http(s) URL and return the response."""
     return build_opener().open(validate_url(url), timeout=timeout)
+
+
+class ErrorKind(enum.Enum):
+    """How the downloader reacts to a failed request (plan D5)."""
+
+    RETRYABLE = None
+    FATAL = ExitCode.NETWORK_ERROR
+    INCOMPATIBLE = ExitCode.SERVER_INCOMPATIBLE
+    SOURCE = ExitCode.SOURCE_ERROR
+
+    @property
+    def exit_code(self):
+        """Exit code of the error, or None if the request can be retried."""
+        return self.value
+
+
+def classify_status(status):
+    """Classify the status of a ranged request; None if it is the expected 206."""
+    if status == 206:
+        return None
+    if status == 200:
+        # The server ignored the Range header.
+        return ErrorKind.INCOMPATIBLE
+    if status in (408, 429) or 500 <= status <= 599:
+        return ErrorKind.RETRYABLE
+    return ErrorKind.FATAL
+
+
+def classify_exception(error):
+    """Classify an exception raised while talking to the server."""
+    if isinstance(error, urllib.error.HTTPError):
+        return classify_status(error.code) or ErrorKind.FATAL
+    if isinstance(error, urllib.error.URLError) and isinstance(
+        error.reason, BaseException
+    ):
+        return classify_exception(error.reason)
+    if isinstance(error, SourceError | socket.gaierror):
+        return ErrorKind.SOURCE
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return ErrorKind.FATAL
+    if isinstance(error, OSError | http.client.HTTPException):
+        # Resets, timeouts, truncated reads, unreachable networks...
+        return ErrorKind.RETRYABLE
+    return ErrorKind.FATAL
+
+
+_CONTENT_RANGE_RE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
+
+
+def classify_range_response(status, content_range, expected_total, content_encoding):
+    """Classify the headers of a response to a ranged request.
+
+    Returns None if the response is a usable 206 whose ``Content-Range``
+    reports ``expected_total`` and which is not content-encoded.
+    """
+    kind = classify_status(status)
+    if kind is not None:
+        return kind
+    match = _CONTENT_RANGE_RE.fullmatch(content_range or "")
+    if match is None or int(match.group(3)) != expected_total:
+        return ErrorKind.INCOMPATIBLE
+    if content_encoding and content_encoding.strip().lower() != "identity":
+        return ErrorKind.INCOMPATIBLE
+    return None
