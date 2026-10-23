@@ -272,7 +272,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `state_key(manifest_id, destination)` según la sección 5 (32 hex de `sha256`).
   - Hecho cuando: tests comprueban que es determinista, tiene 32 caracteres hexadecimales, cambia si cambia el manifest o el destino, y que el destino se normaliza a ruta absoluta.
 
-- [ ] **T39 — Guardado y carga atómicos**
+- [x] **T39 — Guardado y carga atómicos**
   - RF/RNF: RF8, RF9, D8
   - Depende de: T37, T38, T35
   - Escribe `<state_key>.json.tmp`, `fsync`, `os.replace` y `fsync` del directorio; carga validando.

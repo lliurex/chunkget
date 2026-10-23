@@ -280,3 +280,140 @@ def test_state_key_matches_the_destination_stored_in_a_new_state(tmp_path, monke
     assert state.state_key(manifest.global_hash, "image.iso") == state.state_key(
         new.manifest_id, new.destination
     )
+
+
+# --- Atomic save and load (T39) ---
+
+import errno
+
+from chunkget.errors import FilesystemError
+
+
+@pytest.fixture
+def saved(tmp_path):
+    """A manifest, a destination, a state directory and a saved state."""
+    manifest = make_manifest(tmp_path)
+    destination = tmp_path / "image.iso"
+    directory = tmp_path / "state"
+    directory.mkdir()
+    new = state.new_state(manifest, destination)
+    state.save_state(new, directory)
+    return manifest, destination, directory, new
+
+
+def state_files(directory):
+    return sorted(os.listdir(directory))
+
+
+def test_save_and_load_round_trip(saved):
+    manifest, destination, directory, new = saved
+    new.chunk_states = "CFP"
+    state.save_state(new, directory)
+    loaded = state.load_state(directory, manifest, destination)
+    assert loaded == new
+
+
+def test_state_is_stored_in_a_file_named_after_the_key(saved):
+    manifest, destination, directory, new = saved
+    key = state.state_key(manifest.global_hash, destination)
+    assert state_files(directory) == [key + ".json"]
+    assert state.state_path(directory, key) == directory / (key + ".json")
+
+
+def test_no_temporary_file_is_left_after_saving(saved):
+    manifest, destination, directory, new = saved
+    for chunk_states in ("CPP", "CCP", "CCC"):
+        new.chunk_states = chunk_states
+        state.save_state(new, directory)
+    assert len(state_files(directory)) == 1
+    assert not any(name.endswith(".tmp") for name in state_files(directory))
+
+
+def test_load_returns_none_when_there_is_no_state(tmp_path):
+    manifest = make_manifest(tmp_path)
+    assert state.load_state(tmp_path, manifest, tmp_path / "image.iso") is None
+
+
+def test_save_syncs_the_file_before_replacing_and_then_the_directory(
+    saved, monkeypatch
+):
+    manifest, destination, directory, new = saved
+    events = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def fsync(fd):
+        events.append("fsync")
+        real_fsync(fd)
+
+    def replace(source, target):
+        events.append("replace")
+        real_replace(source, target)
+
+    monkeypatch.setattr(state.os, "fsync", fsync)
+    monkeypatch.setattr(state.os, "replace", replace)
+    new.chunk_states = "CPP"
+    state.save_state(new, directory)
+    assert events == ["fsync", "replace", "fsync"]
+
+
+def test_if_replace_fails_the_previous_state_stays_intact(saved, monkeypatch):
+    manifest, destination, directory, new = saved
+    previous = state.load_state(directory, manifest, destination)
+
+    def failing_replace(source, target):
+        raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(state.os, "replace", failing_replace)
+    new.chunk_states = "CCC"
+    with pytest.raises(FilesystemError) as excinfo:
+        state.save_state(new, directory)
+    assert excinfo.value.exit_code == ExitCode.FILESYSTEM_ERROR
+    monkeypatch.undo()
+    assert state.load_state(directory, manifest, destination) == previous
+    assert not any(name.endswith(".tmp") for name in state_files(directory))
+
+
+def test_if_writing_fails_the_previous_state_stays_intact(saved, monkeypatch):
+    manifest, destination, directory, new = saved
+    previous = state.load_state(directory, manifest, destination)
+
+    def disk_full(fd):
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    monkeypatch.setattr(state.os, "fsync", disk_full)
+    new.chunk_states = "CCC"
+    with pytest.raises(FilesystemError) as excinfo:
+        state.save_state(new, directory)
+    assert "No space left on device" in str(excinfo.value)
+    monkeypatch.undo()
+    assert state.load_state(directory, manifest, destination) == previous
+    assert len(state_files(directory)) == 1
+
+
+def test_save_into_a_missing_directory_is_a_filesystem_error(tmp_path):
+    new = state.new_state(make_manifest(tmp_path), tmp_path / "image.iso")
+    with pytest.raises(FilesystemError):
+        state.save_state(new, tmp_path / "missing")
+
+
+def test_load_validates_the_content(saved):
+    manifest, destination, directory, new = saved
+    (path,) = [directory / name for name in state_files(directory)]
+    path.write_text(new.to_json().replace('"PPP"', '"PP"'))
+    with pytest.raises(StateInvalidError):
+        state.load_state(directory, manifest, destination)
+    path.write_text("not json")
+    with pytest.raises(StateInvalidError):
+        state.load_state(directory, manifest, destination)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_unreadable_state_is_a_filesystem_error(saved):
+    manifest, destination, directory, new = saved
+    (path,) = [directory / name for name in state_files(directory)]
+    path.chmod(0)
+    try:
+        with pytest.raises(FilesystemError):
+            state.load_state(directory, manifest, destination)
+    finally:
+        path.chmod(0o600)

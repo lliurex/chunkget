@@ -1,11 +1,13 @@
 """The state file of a download (plan section 5)."""
 
+import contextlib
 import dataclasses
 import hashlib
 import json
 import os
+from pathlib import Path
 
-from chunkget.errors import StateInvalidError
+from chunkget.errors import StateInvalidError, filesystem_errors
 from chunkget.i18n import _
 
 STATE_VERSION = 1
@@ -130,3 +132,54 @@ def _validate(loaded, manifest):
                 "manifest has {expected} chunks"
             ).format(found=len(loaded.chunk_states), expected=len(manifest.chunks))
         )
+
+
+def state_path(directory, key):
+    return Path(directory) / (key + ".json")
+
+
+def save_state(state, directory):
+    """Atomically write ``state`` in ``directory``.
+
+    The data goes to ``<key>.json.tmp``, is synced, replaces the real file
+    and the directory is synced too. A failure at any point leaves the
+    previous state untouched and no temporary file behind.
+    """
+    path = state_path(directory, state_key(state.manifest_id, state.destination))
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        with filesystem_errors(path):
+            with open(temporary, "w", encoding="utf-8") as handle:
+                handle.write(state.to_json())
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            _sync_directory(directory)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+
+
+def _sync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def load_state(directory, manifest, destination):
+    """Load and validate the state of ``manifest`` downloaded to ``destination``.
+
+    Returns None if there is no state file.
+    """
+    key = state_key(manifest.global_hash, destination)
+    path = state_path(directory, key)
+    with filesystem_errors(path):
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except FileNotFoundError:
+            return None
+    return from_json(data, manifest)
