@@ -233,7 +233,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `storage.check_free_space(directory, needed)` con `shutil.disk_usage`.
   - Hecho cuando: tests con `disk_usage` sustituido comprueban que con espacio justo pasa, con un byte menos lanza `NoSpaceError` (código 9), y que el cálculo para un destino existente usa `size − tamaño actual`.
 
-- [ ] **T33 — Creación del destino con el tamaño del manifest**
+- [x] **T33 — Creación del destino con el tamaño del manifest**
   - RF/RNF: RF7
   - Depende de: T32
   - `storage.prepare_destination(path, size)`: crea o extiende el fichero al tamaño exacto, con `os.posix_fallocate` y, si no está soportado, con truncado.
