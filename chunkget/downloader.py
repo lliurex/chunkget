@@ -1,5 +1,6 @@
 """Orchestration of the ``download`` command."""
 
+import enum
 import re
 
 from chunkget import config, events, http, manifest
@@ -48,3 +49,35 @@ def obtain_manifest(
         if listener is not None:
             listener(events.ManifestSaved(path=str(path)))
     return loaded
+
+
+class Scenario(enum.Enum):
+    """What to do with the destination and the state at the start (D14)."""
+
+    NEW = "new"
+    NEW_DISCARDING_STATE = "new_discarding_state"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    RESUME = "resume"
+    INCONSISTENT = "inconsistent"
+
+
+def decide_scenario(
+    destination_size, state_exists, manifest_size, restart=False, overwrite=False
+):
+    """Decide how a download starts (table of D14). A pure function.
+
+    ``destination_size`` is None if the destination does not exist.
+    ``overwrite`` means the user already accepted replacing an existing
+    destination; without it that case is ``NEEDS_CONFIRMATION``.
+    """
+    destination_exists = destination_size is not None
+    if not destination_exists:
+        return Scenario.NEW_DISCARDING_STATE if state_exists else Scenario.NEW
+    if state_exists and not restart:
+        if destination_size == manifest_size:
+            return Scenario.RESUME
+        return Scenario.INCONSISTENT
+    # The destination exists and is going to be downloaded again.
+    if not overwrite:
+        return Scenario.NEEDS_CONFIRMATION
+    return Scenario.NEW_DISCARDING_STATE if state_exists else Scenario.NEW

@@ -318,7 +318,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `downloader.py`: cuando la fuente del manifest es una URL, valida los bytes recibidos, los guarda con T44 y continúa la descarga con el manifest validado en memoria; si la fuente es una ruta local, no escribe ningún manifest. Acepta los parámetros `manifest_file` y `overwrite_manifest`, y emite un evento con la ruta guardada.
   - Hecho cuando: tests con el servidor de pruebas comprueban: tras resolver una URL existe el fichero local y el servidor recibió una sola petición del manifest; con una ruta local no se crea ningún fichero nuevo; con la misma URL repetida no se lanza `OutputExistsError`; con un fichero local distinto en la ruta por defecto se lanza `OutputExistsError` salvo `overwrite_manifest=True`.
 
-- [ ] **T46 — Decisión de escenario destino/estado (función pura)**
+- [x] **T46 — Decisión de escenario destino/estado (función pura)**
   - RF/RNF: RF7, RF8, D14
   - Depende de: T36
   - Dado si existen destino y estado, su tamaño, `restart` y `overwrite`, devuelve el escenario: `new`, `new_discarding_state`, `needs_confirmation`, `resume`, `inconsistent`.

@@ -244,3 +244,112 @@ def test_resolve_manifest_still_writes_nothing(manifest_file, http_server, workd
     url = http_server.serve("/m.manifest", path.read_bytes())
     assert downloader.resolve_manifest(url, 5) == manifest
     assert os.listdir(workdir) == []
+
+
+# --- Destination / state scenario (T46) ---
+
+import itertools
+
+from chunkget.downloader import Scenario, decide_scenario
+
+SIZE = 1000
+ABSENT, MATCHING, WRONG = None, SIZE, SIZE + 1
+
+
+def test_scenario_names():
+    assert {scenario.value for scenario in Scenario} == {
+        "new",
+        "new_discarding_state",
+        "needs_confirmation",
+        "resume",
+        "inconsistent",
+    }
+
+
+def decide(destination_size, state_exists, restart=False, overwrite=False):
+    return decide_scenario(
+        destination_size, state_exists, SIZE, restart=restart, overwrite=overwrite
+    )
+
+
+@pytest.mark.parametrize(
+    "destination_size, state_exists, expected",
+    [
+        # The five rows of the table of D14.
+        (ABSENT, False, Scenario.NEW),
+        (ABSENT, True, Scenario.NEW_DISCARDING_STATE),
+        (MATCHING, False, Scenario.NEEDS_CONFIRMATION),
+        (WRONG, True, Scenario.INCONSISTENT),
+        (MATCHING, True, Scenario.RESUME),
+    ],
+)
+def test_rows_of_the_table_of_d14(destination_size, state_exists, expected):
+    assert decide(destination_size, state_exists) is expected
+
+
+def test_existing_destination_of_any_size_without_state_needs_confirmation():
+    for size in (0, 1, SIZE - 1, SIZE, SIZE + 1):
+        assert decide(size, False) is Scenario.NEEDS_CONFIRMATION
+
+
+def test_overwrite_accepts_an_existing_destination_without_state():
+    assert decide(MATCHING, False, overwrite=True) is Scenario.NEW
+    assert decide(WRONG, False, overwrite=True) is Scenario.NEW
+
+
+def test_overwrite_does_not_hide_an_inconsistent_state():
+    assert decide(WRONG, True, overwrite=True) is Scenario.INCONSISTENT
+
+
+def test_overwrite_does_not_change_a_resume():
+    assert decide(MATCHING, True, overwrite=True) is Scenario.RESUME
+
+
+@pytest.mark.parametrize(
+    "destination_size, state_exists, overwrite, expected",
+    [
+        (ABSENT, False, False, Scenario.NEW),
+        (ABSENT, False, True, Scenario.NEW),
+        (ABSENT, True, False, Scenario.NEW_DISCARDING_STATE),
+        (ABSENT, True, True, Scenario.NEW_DISCARDING_STATE),
+        (MATCHING, False, False, Scenario.NEEDS_CONFIRMATION),
+        (WRONG, False, False, Scenario.NEEDS_CONFIRMATION),
+        (MATCHING, False, True, Scenario.NEW),
+        (WRONG, False, True, Scenario.NEW),
+        (MATCHING, True, False, Scenario.NEEDS_CONFIRMATION),
+        (WRONG, True, False, Scenario.NEEDS_CONFIRMATION),
+        (MATCHING, True, True, Scenario.NEW_DISCARDING_STATE),
+        (WRONG, True, True, Scenario.NEW_DISCARDING_STATE),
+    ],
+)
+def test_effect_of_restart(destination_size, state_exists, overwrite, expected):
+    assert decide(
+        destination_size, state_exists, restart=True, overwrite=overwrite
+    ) is expected
+
+
+def test_restart_resolves_what_would_have_been_inconsistent():
+    assert decide(WRONG, True) is Scenario.INCONSISTENT
+    assert decide(WRONG, True, restart=True, overwrite=True) is (
+        Scenario.NEW_DISCARDING_STATE
+    )
+
+
+def test_restart_never_resumes():
+    for destination_size, state_exists, overwrite in itertools.product(
+        (ABSENT, MATCHING, WRONG), (False, True), (False, True)
+    ):
+        assert decide(
+            destination_size, state_exists, restart=True, overwrite=overwrite
+        ) is not Scenario.RESUME
+
+
+def test_empty_manifest_and_empty_destination_resume():
+    assert decide_scenario(0, True, 0) is Scenario.RESUME
+    assert decide_scenario(1, True, 0) is Scenario.INCONSISTENT
+    assert decide_scenario(0, True, 5) is Scenario.INCONSISTENT
+
+
+def test_decision_depends_only_on_its_arguments():
+    arguments = (MATCHING, True, SIZE)
+    assert decide_scenario(*arguments) is decide_scenario(*arguments)
