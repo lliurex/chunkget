@@ -312,7 +312,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `manifest.py`: función que recibe los bytes ya validados y escribe el manifest directamente en la ruta local (por defecto `./<name>.chunkget.manifest`, o la ruta indicada), sin fichero intermedio. Si la ruta existe con contenido idéntico no hace nada; si difiere y no hay `overwrite`, lanza `OutputExistsError`; si hay `overwrite`, lo reemplaza. Un `OSError` se traduce a `FilesystemError` (código 10).
   - Hecho cuando: tests comprueban: se crea el fichero con los mismos bytes que el original y `load_manifest_file` lo carga igual; con contenido idéntico no se reescribe (la fecha de modificación no cambia) ni se lanza error; con contenido distinto y sin `overwrite` se lanza `OutputExistsError` y el fichero queda intacto; con `overwrite` se reemplaza; en un directorio de solo lectura se lanza `FilesystemError` (10); y con bytes de un manifest inválido no se crea ningún fichero.
 
-- [ ] **T45 — Guardar el manifest en el flujo de `download`**
+- [x] **T45 — Guardar el manifest en el flujo de `download`**
   - RF/RNF: RF6, RF7
   - Depende de: T44
   - `downloader.py`: cuando la fuente del manifest es una URL, valida los bytes recibidos, los guarda con T44 y continúa la descarga con el manifest validado en memoria; si la fuente es una ruta local, no escribe ningún manifest. Acepta los parámetros `manifest_file` y `overwrite_manifest`, y emite un evento con la ruta guardada.

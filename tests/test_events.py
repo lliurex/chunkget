@@ -11,6 +11,7 @@ EVENTS = [
     (events.RetryStarted, ("attempt", "max_retries", "pending"), (2, 5, 7)),
     (events.GlobalCheckStarted, ("algorithm",), ("sha256",)),
     (events.Finished, ("destination",), ("/tmp/image.iso",)),
+    (events.ManifestSaved, ("path",), ("/tmp/image.iso.chunkget.manifest",)),
 ]
 
 

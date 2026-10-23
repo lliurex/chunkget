@@ -40,3 +40,10 @@ class Finished:
     """The download completed and the global hash was verified."""
 
     destination: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ManifestSaved:
+    """A manifest downloaded from a URL is available as a local file."""
+
+    path: str

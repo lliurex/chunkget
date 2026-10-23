@@ -95,3 +95,152 @@ def test_path_with_a_colon_is_still_a_local_path(manifest_file, tmp_path):
     odd = tmp_path / "a:b.manifest"
     odd.write_bytes(path.read_bytes())
     assert downloader.resolve_manifest(odd, 5) == manifest
+
+
+# --- Saving the manifest in the download flow (T45) ---
+
+import os
+
+from chunkget import events
+from chunkget.errors import FilesystemError, OutputExistsError
+
+DEFAULT_NAME = "image.iso.chunkget.manifest"
+
+
+@pytest.fixture
+def workdir(tmp_path, monkeypatch):
+    """An empty current directory, apart from where the manifest file lives."""
+    directory = tmp_path / "work"
+    directory.mkdir()
+    monkeypatch.chdir(directory)
+    return directory
+
+
+def obtain(source, listener=None, **kwargs):
+    events_received = []
+    manifest = downloader.obtain_manifest(
+        source, 5, listener=listener or events_received.append, **kwargs
+    )
+    return manifest, events_received
+
+
+def test_url_manifest_is_saved_and_the_download_continues_with_it(
+    manifest_file, http_server, workdir
+):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    result, received = obtain(url)
+    assert result == manifest
+    saved = workdir / DEFAULT_NAME
+    assert saved.read_bytes() == path.read_bytes()
+    assert [r.path for r in http_server.requests] == ["/m.manifest"]
+    assert received == [events.ManifestSaved(path=DEFAULT_NAME)]
+
+
+def test_manifest_file_selects_where_it_is_saved(
+    manifest_file, http_server, workdir, tmp_path
+):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    target = tmp_path / "elsewhere.manifest"
+    _, received = obtain(url, manifest_file=target)
+    assert target.read_bytes() == path.read_bytes()
+    assert os.listdir(workdir) == []
+    assert received == [events.ManifestSaved(path=str(target))]
+
+
+def test_local_manifest_writes_nothing(manifest_file, workdir):
+    manifest, path = manifest_file
+    result, received = obtain(str(path))
+    assert result == manifest
+    assert os.listdir(workdir) == []
+    assert received == []
+
+
+def test_local_manifest_ignores_manifest_file(manifest_file, workdir, tmp_path):
+    manifest, path = manifest_file
+    target = tmp_path / "never.manifest"
+    obtain(str(path), manifest_file=target)
+    assert not target.exists()
+    assert os.listdir(workdir) == []
+
+
+def test_same_url_again_is_not_an_error(manifest_file, http_server, workdir):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    obtain(url)
+    saved = workdir / DEFAULT_NAME
+    os.utime(saved, (1_000_000, 1_000_000))
+    result, received = obtain(url)
+    assert result == manifest
+    assert saved.stat().st_mtime == 1_000_000
+    # The path is reported even though nothing was rewritten.
+    assert received == [events.ManifestSaved(path=DEFAULT_NAME)]
+
+
+def test_different_local_file_at_the_default_path_is_refused(
+    manifest_file, http_server, workdir
+):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    saved = workdir / DEFAULT_NAME
+    saved.write_bytes(b"another manifest")
+    with pytest.raises(OutputExistsError) as excinfo:
+        obtain(url)
+    assert excinfo.value.exit_code == ExitCode.USER_DECLINED
+    assert saved.read_bytes() == b"another manifest"
+
+
+def test_overwrite_manifest_replaces_the_different_file(
+    manifest_file, http_server, workdir
+):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    saved = workdir / DEFAULT_NAME
+    saved.write_bytes(b"another manifest")
+    result, _ = obtain(url, overwrite_manifest=True)
+    assert result == manifest
+    assert saved.read_bytes() == path.read_bytes()
+
+
+def test_invalid_manifest_from_url_saves_nothing(http_server, workdir):
+    url = http_server.serve("/m.manifest", b"not a manifest")
+    received = []
+    with pytest.raises(ManifestInvalidError):
+        obtain(url, listener=received.append)
+    assert os.listdir(workdir) == []
+    assert received == []
+
+
+def test_failed_fetch_saves_nothing(http_server, workdir):
+    with pytest.raises(SourceError):
+        obtain(http_server.url("/missing"))
+    assert os.listdir(workdir) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_unwritable_location_is_a_filesystem_error(
+    manifest_file, http_server, workdir
+):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    workdir.chmod(0o500)
+    try:
+        with pytest.raises(FilesystemError):
+            obtain(url)
+    finally:
+        workdir.chmod(0o700)
+
+
+def test_listener_is_optional(manifest_file, http_server, workdir):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    assert downloader.obtain_manifest(url, 5) == manifest
+    assert (workdir / DEFAULT_NAME).is_file()
+
+
+def test_resolve_manifest_still_writes_nothing(manifest_file, http_server, workdir):
+    manifest, path = manifest_file
+    url = http_server.serve("/m.manifest", path.read_bytes())
+    assert downloader.resolve_manifest(url, 5) == manifest
+    assert os.listdir(workdir) == []
