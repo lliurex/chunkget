@@ -477,7 +477,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Convierte los eventos en líneas de progreso en stderr (formato de 7.4), con reescritura de línea solo en terminal; imprime `Download completed: <ruta>` en stdout y `Global hash verified (<alg>).` en stderr. Con un manifest por URL imprime antes `Manifest saved: <ruta>` en stdout.
   - Hecho cuando: un test descarga contra el servidor y comprueba stdout, stderr (líneas de progreso con `chunk i/n`), código 0 y fichero idéntico al original; y otro, con el manifest servido por URL, comprueba la línea `Manifest saved: <ruta>` y que el fichero existe.
 
-- [ ] **T73 — `download`: preguntas y opciones**
+- [x] **T73 — `download`: preguntas y opciones**
   - RF/RNF: RF6, RF7, RF8, D14
   - Depende de: T72, T47, T45
   - Atiende `DestinationExistsError` y `OutputExistsError` (manifest descargado distinto del existente) preguntando si se sobrescribe; `-y`; sin terminal → código 4. Soporta `-o`, `--state-dir`, `--manifest-file` y `--restart`. `--manifest-file` con un `MANIFEST` que es ruta local → código 2.

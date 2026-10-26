@@ -1571,3 +1571,36 @@ def test_download_started_comes_before_any_progress(full_setup):
     download(full_setup, listener=received.append)
     assert isinstance(received[0], events.DownloadStarted)
     assert received[0].done_bytes == 0
+
+
+# --- download_manifest and the path of the exists errors (T73) ---
+
+
+def test_destination_exists_error_names_the_destination(full_setup):
+    manifest_path, destination, state_dir, _server = full_setup
+    destination.write_bytes(b"precious")
+    with pytest.raises(DestinationExistsError) as excinfo:
+        download(full_setup)
+    assert excinfo.value.path == destination
+
+
+def test_output_exists_error_names_the_manifest_file(full_setup, tmp_path, monkeypatch):
+    manifest_path, destination, state_dir, server = full_setup
+    url = server.serve("/m.manifest", manifest_path.read_bytes())
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    (work / "image.iso.chunkget.manifest").write_text("different")
+    with pytest.raises(OutputExistsError) as excinfo:
+        downloader.download(url, destination, state_dir, timeout=5)
+    assert str(excinfo.value.path) == "image.iso.chunkget.manifest"
+
+
+def test_download_manifest_does_not_read_the_manifest_again(full_setup):
+    manifest_path, destination, state_dir, server = full_setup
+    url = server.serve("/m.manifest", manifest_path.read_bytes())
+    loaded = downloader.resolve_manifest(url, 5)
+    server.requests.clear()
+    downloader.download_manifest(loaded, destination, state_dir, timeout=5, max_retries=0)
+    assert "/m.manifest" not in [r.path for r in server.requests]
+    assert destination.read_bytes() == CONTENT

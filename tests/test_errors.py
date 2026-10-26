@@ -121,3 +121,12 @@ def test_library_errors_are_translated(prefix_translation):
         with pytest.raises(errors.ChunkgetError) as excinfo:
             call()
         assert str(excinfo.value).startswith("T: ")
+
+
+def test_exists_errors_carry_the_path_and_default_to_none():
+    for cls in (errors.OutputExistsError, errors.DestinationExistsError):
+        assert cls("x").path is None
+        error = cls("x", path="/tmp/f")
+        assert error.path == "/tmp/f"
+        assert str(error) == "x"
+        assert error.exit_code == ExitCode.USER_DECLINED

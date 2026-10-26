@@ -8,7 +8,9 @@ import chunkget
 from chunkget import config, downloader, events, hashing, http, publisher
 from chunkget.errors import (
     ChunkgetError,
+    DestinationExistsError,
     ExitCode,
+    OutputExistsError,
     SourceError,
     UsageError,
     UserDeclinedError,
@@ -88,6 +90,36 @@ def build_parser():
     )
     download.add_argument(
         "manifest", metavar="MANIFEST", help=_("local path or http(s) URL of a manifest")
+    )
+    download.add_argument(
+        "-o",
+        "--output",
+        metavar="OUTPUT",
+        help=_("file to download to (default: ./<name> from the manifest)"),
+    )
+    download.add_argument(
+        "--state-dir",
+        metavar="DIR",
+        help=_("directory of the state files (default: ~/.local/state/chunkget)"),
+    )
+    download.add_argument(
+        "--manifest-file",
+        metavar="PATH",
+        help=_(
+            "with a manifest URL: where to save it "
+            "(default: ./<name>.chunkget.manifest)"
+        ),
+    )
+    download.add_argument(
+        "--restart",
+        action="store_true",
+        help=_("discard the saved state and download everything again"),
+    )
+    download.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help=_("answer yes when asked whether to overwrite a file"),
     )
     _add_network_options(download)
     download.set_defaults(handler=_download)
@@ -410,12 +442,44 @@ class _DownloadReporter:
 
 
 def _download(args):
-    destination = downloader.download(
-        args.manifest,
-        timeout=args.timeout,
-        max_retries=args.max_retries,
-        listener=_DownloadReporter(),
-    )
+    if args.manifest_file is not None and not downloader.is_url(args.manifest):
+        raise UsageError(
+            _("--manifest-file can only be used when MANIFEST is a URL")
+        )
+    reporter = _DownloadReporter()
+    # The questions are asked when the core reports the conflict; it is then
+    # called again with the answer already given.
+    overwrite_manifest = args.yes
+    while True:
+        try:
+            loaded = downloader.obtain_manifest(
+                args.manifest,
+                args.timeout,
+                args.manifest_file,
+                overwrite_manifest,
+                reporter,
+            )
+            break
+        except OutputExistsError as error:
+            _confirm_overwrite(error.path)
+            overwrite_manifest = True
+    overwrite = args.yes
+    while True:
+        try:
+            destination = downloader.download_manifest(
+                loaded,
+                args.output,
+                args.state_dir,
+                args.timeout,
+                args.max_retries,
+                restart=args.restart,
+                overwrite=overwrite,
+                listener=reporter,
+            )
+            break
+        except DestinationExistsError as error:
+            _confirm_overwrite(error.path)
+            overwrite = True
     print(_("Download completed: {path}").format(path=destination))
     return ExitCode.OK
 

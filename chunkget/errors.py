@@ -47,11 +47,22 @@ class UserDeclinedError(ChunkgetError):
     exit_code = ExitCode.USER_DECLINED
 
 
-class OutputExistsError(UserDeclinedError):
+class _PathExistsError(UserDeclinedError):
+    """A file that exists and must not be replaced without asking.
+
+    ``path`` is that file, so the caller can ask about it.
+    """
+
+    def __init__(self, message, path=None):
+        super().__init__(message)
+        self.path = path
+
+
+class OutputExistsError(_PathExistsError):
     """The output manifest already exists and overwriting was not allowed."""
 
 
-class DestinationExistsError(UserDeclinedError):
+class DestinationExistsError(_PathExistsError):
     """The destination already exists and overwriting was not allowed."""
 
 

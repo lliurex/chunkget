@@ -62,7 +62,8 @@ def make_manifest_from_url(
     if download_to is not None:
         if os.path.lexists(download_to) and not overwrite_download:
             raise DestinationExistsError(
-                _("the destination {path} already exists").format(path=download_to)
+                _("the destination {path} already exists").format(path=download_to),
+                path=download_to,
             )
         http.simple_download(url, download_to, timeout, max_retries, sleep)
         local_file = download_to

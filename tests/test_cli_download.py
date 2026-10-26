@@ -201,3 +201,223 @@ def test_texts_are_translatable(env, served, capsys):
     assert code == 0
     assert out.startswith("«T»Download completed")
     assert all(line.startswith("«T»") for line in err.splitlines())
+
+
+# --- Questions and options (T73) ---
+
+from chunkget import manifest as manifest_module
+
+
+class FakeStdin(io.StringIO):
+    def __init__(self, text="", tty=True):
+        super().__init__(text)
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+
+@pytest.fixture
+def stdin(monkeypatch):
+    def set_stdin(text="", tty=True):
+        monkeypatch.setattr("sys.stdin", FakeStdin(text, tty))
+
+    return set_stdin
+
+
+# Destination that exists without a state
+
+
+def test_existing_destination_asks_and_yes_replaces_it(env, served, capsys, stdin):
+    (env / "image.iso").write_bytes(b"precious")
+    stdin("y\n")
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 0
+    assert "image.iso" in err and "overwrite" in err.lower()
+    assert (env / "image.iso").read_bytes() == CONTENT
+
+
+@pytest.mark.parametrize("answer", ["n", "", "no"])
+def test_existing_destination_declined(env, served, capsys, stdin, answer):
+    (env / "image.iso").write_bytes(b"precious")
+    stdin(answer + "\n")
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 4
+    assert out == ""
+    assert (env / "image.iso").read_bytes() == b"precious"
+    assert served[0].requests == []
+
+
+def test_existing_destination_with_yes_option(env, served, capsys, stdin):
+    (env / "image.iso").write_bytes(b"precious")
+    stdin("", tty=False)
+    code, out, err = run(capsys, "download", str(served[1]), "-y")
+    assert code == 0
+    assert "overwrite" not in err.lower()
+    assert (env / "image.iso").read_bytes() == CONTENT
+
+
+def test_existing_destination_without_terminal(env, served, capsys, stdin):
+    (env / "image.iso").write_bytes(b"precious")
+    stdin("y\n", tty=False)
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 4
+    assert (env / "image.iso").read_bytes() == b"precious"
+
+
+# Manifest downloaded from a URL that differs from the local file
+
+
+def local_manifest(env):
+    path = env / "image.iso.chunkget.manifest"
+    path.write_text("a different manifest")
+    return path
+
+
+def test_different_local_manifest_yes_replaces_it(env, served, capsys, stdin):
+    path = local_manifest(env)
+    stdin("y\n")
+    code, out, err = run(capsys, "download", served[2])
+    assert code == 0
+    assert path.name in err and "overwrite" in err.lower()
+    assert path.read_bytes() == served[1].read_bytes()
+    assert (env / "image.iso").read_bytes() == CONTENT
+
+
+@pytest.mark.parametrize("answer", ["n", ""])
+def test_different_local_manifest_declined(env, served, capsys, stdin, answer):
+    path = local_manifest(env)
+    stdin(answer + "\n")
+    code, out, err = run(capsys, "download", served[2])
+    assert code == 4
+    assert out == ""
+    assert path.read_text() == "a different manifest"
+    assert not (env / "image.iso").exists()
+
+
+def test_different_local_manifest_with_yes_option(env, served, capsys, stdin):
+    path = local_manifest(env)
+    stdin("", tty=False)
+    code, out, err = run(capsys, "download", served[2], "-y")
+    assert code == 0
+    assert path.read_bytes() == served[1].read_bytes()
+
+
+def test_different_local_manifest_without_terminal(env, served, capsys, stdin):
+    path = local_manifest(env)
+    stdin("y\n", tty=False)
+    code, out, err = run(capsys, "download", served[2])
+    assert code == 4
+    assert path.read_text() == "a different manifest"
+
+
+def test_same_manifest_url_again_asks_nothing(env, served, capsys, stdin):
+    stdin("", tty=False)
+    assert run(capsys, "download", served[2])[0] == 0
+    code, out, err = run(capsys, "download", served[2])
+    assert code == 0
+    assert "overwrite" not in err.lower()
+
+
+def test_both_questions_are_asked_in_order(env, served, capsys, stdin):
+    local_manifest(env)
+    (env / "image.iso").write_bytes(b"precious")
+    stdin("y\ny\n")
+    code, out, err = run(capsys, "download", served[2])
+    assert code == 0
+    assert err.index("image.iso.chunkget.manifest") < err.index("Downloading")
+    assert (env / "image.iso").read_bytes() == CONTENT
+
+
+def test_manifest_is_requested_only_once_when_nothing_conflicts(
+    env, served, capsys, stdin
+):
+    stdin("", tty=False)
+    run(capsys, "download", served[2])
+    paths = [r.path for r in served[0].requests]
+    assert paths.count("/image.iso.chunkget.manifest") == 1
+
+
+# Options
+
+
+def test_output_option_selects_the_destination(env, served, tmp_path, capsys):
+    target = tmp_path / "elsewhere.bin"
+    code, out, err = run(capsys, "download", str(served[1]), "-o", str(target))
+    assert code == 0
+    assert out == "Download completed: %s\n" % target
+    assert target.read_bytes() == CONTENT
+    assert not (env / "image.iso").exists()
+
+
+def test_long_output_option(env, served, tmp_path, capsys):
+    target = tmp_path / "x.bin"
+    assert run(capsys, "download", str(served[1]), "--output", str(target))[0] == 0
+    assert target.exists()
+
+
+def test_state_dir_option_places_the_state_there(env, served, tmp_path, capsys):
+    state_dir = tmp_path / "my_state"
+    code, *_ = run(capsys, "download", str(served[1]), "--state-dir", str(state_dir))
+    assert code == 0
+    suffixes = sorted(p.suffix for p in state_dir.iterdir())
+    assert suffixes == [".json", ".lock"]
+    assert not (tmp_path / "state").exists()
+
+
+def test_manifest_file_option_saves_the_manifest_there(env, served, tmp_path, capsys):
+    target = tmp_path / "saved.manifest"
+    code, out, err = run(
+        capsys, "download", served[2], "--manifest-file", str(target)
+    )
+    assert code == 0
+    assert out.splitlines()[0] == "Manifest saved: %s" % target
+    assert target.read_bytes() == served[1].read_bytes()
+    assert not (env / "image.iso.chunkget.manifest").exists()
+
+
+def test_manifest_file_with_a_local_manifest_is_a_usage_error(
+    env, served, tmp_path, capsys
+):
+    code, out, err = run(
+        capsys, "download", str(served[1]), "--manifest-file", str(tmp_path / "x")
+    )
+    assert code == 2
+    assert out == ""
+    assert "--manifest-file" in err
+    assert not (env / "image.iso").exists()
+    assert served[0].requests == []
+
+
+def test_restart_downloads_again(env, served, capsys, stdin):
+    stdin("", tty=False)
+    assert run(capsys, "download", str(served[1]))[0] == 0
+    served[0].requests.clear()
+    code, out, err = run(capsys, "download", str(served[1]), "--restart", "-y")
+    assert code == 0
+    assert len(served[0].requests) == 5
+    assert (env / "image.iso").read_bytes() == CONTENT
+
+
+def test_restart_asks_before_replacing_the_destination(env, served, capsys, stdin):
+    assert run(capsys, "download", str(served[1]))[0] == 0
+    served[0].requests.clear()
+    stdin("n\n")
+    code, out, err = run(capsys, "download", str(served[1]), "--restart")
+    assert code == 4
+    assert served[0].requests == []
+
+
+def test_without_restart_a_finished_download_is_only_verified(env, served, capsys):
+    assert run(capsys, "download", str(served[1]))[0] == 0
+    served[0].requests.clear()
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 0
+    assert served[0].requests == []
+    assert "Global hash verified" in err
+
+
+def test_help_lists_the_options(capsys):
+    code, out, err = run(capsys, "download", "--help")
+    for option in ("-o", "--output", "--state-dir", "--manifest-file", "--restart", "-y", "--yes"):
+        assert option in out

@@ -136,7 +136,8 @@ def prepare_download(
     )
     if scenario is Scenario.NEEDS_CONFIRMATION:
         raise DestinationExistsError(
-            _("the destination {path} already exists").format(path=destination)
+            _("the destination {path} already exists").format(path=destination),
+            path=destination,
         )
     if scenario is Scenario.INCONSISTENT:
         raise StateInvalidError(
@@ -330,6 +331,36 @@ def download(
     loaded = obtain_manifest(
         source, timeout, manifest_file, overwrite_manifest, listener
     )
+    return download_manifest(
+        loaded,
+        destination,
+        state_dir,
+        timeout,
+        max_retries,
+        restart,
+        overwrite,
+        sleep,
+        listener,
+    )
+
+
+def download_manifest(
+    loaded,
+    destination=None,
+    state_dir=None,
+    timeout=config.DEFAULT_TIMEOUT,
+    max_retries=config.DEFAULT_MAX_RETRIES,
+    restart=False,
+    overwrite=False,
+    sleep=None,
+    listener=None,
+):
+    """Download the file described by an already validated manifest.
+
+    The second half of ``download``: it lets a caller that has to ask the
+    user about the destination call it again without reading the manifest
+    again.
+    """
     if destination is None:
         destination = config.default_destination(loaded.name)
     destination = Path(destination)

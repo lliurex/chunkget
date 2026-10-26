@@ -380,7 +380,8 @@ def save_manifest(data, path=None, overwrite=False):
             return path
         if existing is not None and not overwrite:
             raise OutputExistsError(
-                _("{path} already exists with a different content").format(path=path)
+                _("{path} already exists with a different content").format(path=path),
+                path=path,
             )
         with open(path, "wb") as handle:
             handle.write(data)
