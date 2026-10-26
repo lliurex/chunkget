@@ -436,7 +436,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `cli.py` con `main(argv) -> int`, subcomandos `make-manifest` y `download`, `--version`, `-h`. `__main__.py` llama a `sys.exit(main())`.
   - Hecho cuando: `tests/test_cli_basic.py` comprueba que `main(["--version"])` imprime `chunkget <versión>` en stdout y devuelve 0, que sin subcomando devuelve 2, y que `python3 -m chunkget --version` funciona en un subproceso.
 
-- [ ] **T66 — Gestión de errores en la CLI**
+- [x] **T66 — Gestión de errores en la CLI**
   - RF/RNF: RNF3
   - Depende de: T65
   - Captura `ChunkgetError` e imprime `chunkget: error: <mensaje>` en stderr; devuelve su código. Cualquier otra excepción devuelve 1.

@@ -4,7 +4,7 @@ import argparse
 import sys
 
 import chunkget
-from chunkget.errors import ExitCode
+from chunkget.errors import ChunkgetError, ExitCode
 from chunkget.i18n import _
 
 
@@ -52,7 +52,7 @@ def _download(args):
 
 
 def _not_implemented():
-    print(_("chunkget: error: this command is not implemented yet"), file=sys.stderr)
+    _error(_("this command is not implemented yet"))
     return ExitCode.UNEXPECTED
 
 
@@ -64,4 +64,20 @@ def main(argv=None):
     except SystemExit as stop:
         # argparse exits for --help, --version and usage errors (code 2).
         return 0 if stop.code is None else stop.code
-    return int(args.handler(args))
+    try:
+        return int(args.handler(args))
+    except ChunkgetError as error:
+        # The message of an expected error is already translated.
+        _error(str(error))
+        return int(error.exit_code)
+    except Exception as error:  # noqa: BLE001 - last resort: report, exit 1
+        _error(
+            _("unexpected error ({kind}): {reason}").format(
+                kind=type(error).__name__, reason=error
+            )
+        )
+        return int(ExitCode.UNEXPECTED)
+
+
+def _error(message):
+    print("chunkget: error: " + message, file=sys.stderr)
