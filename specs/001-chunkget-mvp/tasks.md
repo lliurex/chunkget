@@ -430,7 +430,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 10 — Interfaz de línea de comandos
 
-- [ ] **T65 — Esqueleto de la CLI**
+- [x] **T65 — Esqueleto de la CLI**
   - RF/RNF: RNF3, RNF4
   - Depende de: T04, T06
   - `cli.py` con `main(argv) -> int`, subcomandos `make-manifest` y `download`, `--version`, `-h`. `__main__.py` llama a `sys.exit(main())`.
