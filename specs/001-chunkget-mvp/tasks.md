@@ -379,7 +379,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: un test con corte a mitad del fragmento 1 comprueba que ese fragmento queda `F`, que los demás se descargan, y que en la pasada de reintento se descarga correctamente y el fichero final es idéntico.
 
-- [ ] **T57 — Ficheros vacíos y menores que un fragmento**
+- [x] **T57 — Ficheros vacíos y menores que un fragmento**
   - RF/RNF: caso «fichero vacío o menor que un fragmento»
   - Depende de: T52
   - Hecho cuando: tests comprueban que una descarga con `size = 0` crea un fichero vacío y valida el hash global sin pedir fragmentos, y que un fichero menor que `chunk_size` se descarga con una única petición.

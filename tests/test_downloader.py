@@ -1310,3 +1310,67 @@ def test_without_retries_the_cut_chunk_is_reported_as_incomplete(
     download(full_setup)
     assert chunk_requests(full_setup[3]) == ["bytes=50-99"]
     assert full_setup[1].read_bytes() == CONTENT
+
+
+# --- Empty files and files smaller than a chunk (T57) ---
+
+
+def manifest_for(tmp_path, http_server, data, chunk_size):
+    """Write the manifest of ``data`` served by the test server."""
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    url = http_server.serve("/image.iso", data)
+    built = manifest_builder.build_manifest(source, url, chunk_size=chunk_size)
+    path = tmp_path / "m.chunkget.manifest"
+    path.write_bytes(built.to_json().encode("utf-8"))
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    return path, tmp_path / "out.bin", state_dir
+
+
+def test_empty_file_is_created_and_verified_without_requests(tmp_path, http_server):
+    manifest_path, destination, state_dir = manifest_for(tmp_path, http_server, b"", 100)
+    received = []
+    downloader.download(
+        manifest_path, destination, state_dir, timeout=5, listener=received.append
+    )
+    assert destination.read_bytes() == b""
+    assert http_server.requests == []
+    assert events.GlobalCheckStarted(algorithm="sha256") in received
+    [state_file] = [p for p in state_dir.iterdir() if p.suffix == ".json"]
+    loaded = state_module.from_json(state_file.read_bytes())
+    assert (loaded.chunk_states, loaded.status) == ("", "completed")
+
+
+def test_empty_file_over_an_existing_empty_destination_needs_confirmation(
+    tmp_path, http_server
+):
+    manifest_path, destination, state_dir = manifest_for(tmp_path, http_server, b"", 100)
+    destination.write_bytes(b"")
+    with pytest.raises(DestinationExistsError):
+        downloader.download(manifest_path, destination, state_dir, timeout=5)
+    downloader.download(manifest_path, destination, state_dir, timeout=5, overwrite=True)
+    assert destination.read_bytes() == b""
+
+
+def test_empty_file_repeated_still_verifies(tmp_path, http_server):
+    manifest_path, destination, state_dir = manifest_for(tmp_path, http_server, b"", 100)
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    assert http_server.requests == []
+
+
+def test_file_smaller_than_a_chunk_takes_a_single_request(tmp_path, http_server):
+    data = b"hello chunkget"
+    manifest_path, destination, state_dir = manifest_for(tmp_path, http_server, data, 100)
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    assert destination.read_bytes() == data
+    assert [r.range for r in http_server.requests] == ["bytes=0-13"]
+
+
+def test_file_of_exactly_one_chunk(tmp_path, http_server):
+    data = bytes(range(100))
+    manifest_path, destination, state_dir = manifest_for(tmp_path, http_server, data, 100)
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    assert destination.read_bytes() == data
+    assert [r.range for r in http_server.requests] == ["bytes=0-99"]
