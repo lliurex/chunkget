@@ -826,3 +826,120 @@ def test_default_sleep_is_time_sleep(pass_setup, monkeypatch):
     monkeypatch.setattr("time.sleep", waits.append)
     downloader.run_passes(*pass_setup[:4], 5, 5)
     assert waits == [2]
+
+
+# --- Global hash validation (T51) ---
+
+from chunkget.errors import GlobalHashMismatchError
+
+
+def complete_download(pass_setup):
+    manifest, destination, current, state_dir, _server = pass_setup
+    downloader.run_passes(manifest, destination, current, state_dir, 5, 0)
+
+
+def verify(pass_setup, loaded=None, listener=None):
+    manifest, destination, current, state_dir, _server = pass_setup
+    downloader.verify_global_hash(
+        loaded or manifest, destination, current, state_dir, listener=listener
+    )
+
+
+def disk_status(pass_setup):
+    manifest, destination, _current, state_dir, _server = pass_setup
+    return state_module.load_state(state_dir, manifest, destination).status
+
+
+def test_matching_hash_completes_the_state(pass_setup):
+    complete_download(pass_setup)
+    assert disk_status(pass_setup) == state_module.IN_PROGRESS
+    verify(pass_setup)
+    assert pass_setup[2].status == state_module.COMPLETED
+    assert disk_status(pass_setup) == state_module.COMPLETED
+
+
+def test_wrong_global_hash_fails_and_keeps_everything(pass_setup):
+    manifest, destination, current, _dir, _server = pass_setup
+    complete_download(pass_setup)
+    bad = dataclasses.replace(manifest, global_hash="sha256:" + "0" * 64)
+    # The state belongs to the manifest id, so the altered manifest is only
+    # used for the comparison.
+    with pytest.raises(GlobalHashMismatchError) as excinfo:
+        verify(pass_setup, bad)
+    assert excinfo.value.exit_code == ExitCode.GLOBAL_HASH_MISMATCH
+    assert current.status == state_module.GLOBAL_CHECK_FAILED
+    assert current.chunk_states == "CCCCC"
+    assert destination.read_bytes() == CONTENT
+
+
+def test_failed_status_is_saved_to_disk(pass_setup):
+    manifest, destination, current, state_dir, _server = pass_setup
+    complete_download(pass_setup)
+    bad = dataclasses.replace(manifest, global_hash="sha256:" + "0" * 64)
+    with pytest.raises(GlobalHashMismatchError):
+        verify(pass_setup, bad)
+    key = state_module.state_key(current.manifest_id, destination)
+    saved = state_module.from_json(
+        state_module.state_path(state_dir, key).read_bytes()
+    )
+    assert saved.status == state_module.GLOBAL_CHECK_FAILED
+
+
+def test_global_check_events(pass_setup):
+    complete_download(pass_setup)
+    received = []
+    verify(pass_setup, listener=received.append)
+    assert received == [
+        events.GlobalCheckStarted(algorithm="sha256"),
+        events.Finished(destination=str(pass_setup[1])),
+    ]
+
+
+def test_no_finished_event_when_the_check_fails(pass_setup):
+    complete_download(pass_setup)
+    bad = dataclasses.replace(pass_setup[0], global_hash="sha256:" + "0" * 64)
+    received = []
+    with pytest.raises(GlobalHashMismatchError):
+        verify(pass_setup, bad, received.append)
+    assert [type(e) for e in received] == [events.GlobalCheckStarted]
+
+
+def test_corrupted_file_with_correct_chunk_states_is_detected(pass_setup):
+    complete_download(pass_setup)
+    with open(pass_setup[1], "r+b") as handle:
+        handle.write(b"\xff")
+    with pytest.raises(GlobalHashMismatchError):
+        verify(pass_setup)
+
+
+def test_uses_the_algorithm_of_the_manifest(tmp_path, http_server):
+    source = tmp_path / "image.iso"
+    source.write_bytes(CONTENT)
+    url = http_server.serve("/image.iso", CONTENT)
+    manifest = manifest_builder.build_manifest(
+        source, url, chunk_size=50, algorithm="sha3_512"
+    )
+    destination = tmp_path / "out.iso"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    current = downloader.prepare_download(manifest, destination, state_dir)
+    downloader.run_passes(manifest, destination, current, state_dir, 5, 0)
+    downloader.verify_global_hash(manifest, destination, current, state_dir)
+    assert current.status == state_module.COMPLETED
+
+
+def test_empty_file_is_verified_without_chunks(tmp_path):
+    source = tmp_path / "empty"
+    source.write_bytes(b"")
+    manifest = manifest_builder.build_manifest(source, DATA_URL, chunk_size=100)
+    destination = tmp_path / "empty.out"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    current = downloader.prepare_download(manifest, destination, state_dir)
+    downloader.verify_global_hash(manifest, destination, current, state_dir)
+    assert current.status == state_module.COMPLETED
+
+
+def test_chunks_not_correct_is_a_programming_error(pass_setup):
+    with pytest.raises(ValueError):
+        verify(pass_setup)

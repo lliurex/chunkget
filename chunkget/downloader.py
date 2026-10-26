@@ -8,6 +8,7 @@ import time
 from chunkget import config, events, hashing, http, manifest, state, storage
 from chunkget.errors import (
     DestinationExistsError,
+    GlobalHashMismatchError,
     RetriesExhaustedError,
     StateInvalidError,
     filesystem_errors,
@@ -264,3 +265,33 @@ def run_passes(
 
 def _count_not_correct(current):
     return len(current.chunk_states) - current.chunk_states.count(state.CORRECT)
+
+
+def verify_global_hash(loaded, destination, current, state_dir, listener=None):
+    """Check the whole file against the global hash of the manifest (RF11).
+
+    Every chunk must be correct already (``ValueError`` otherwise: calling
+    it earlier is a programming error). On success the state becomes
+    ``completed``; on failure ``global_check_failed`` and
+    ``GlobalHashMismatchError`` is raised. Nothing is deleted.
+    """
+    if any(char != state.CORRECT for char in current.chunk_states):
+        raise ValueError(_("the global hash can only be checked when every chunk is correct"))
+    algorithm, expected = hashing.parse_hash(loaded.global_hash)
+    if listener is not None:
+        listener(events.GlobalCheckStarted(algorithm=algorithm))
+    with filesystem_errors(destination):
+        found = hashing.hash_file(destination, algorithm)
+    if found != expected:
+        current.status = state.GLOBAL_CHECK_FAILED
+        state.save_state(current, state_dir)
+        raise GlobalHashMismatchError(
+            _(
+                "global validation failed: the file {path} does not match the "
+                "manifest hash"
+            ).format(path=destination)
+        )
+    current.status = state.COMPLETED
+    state.save_state(current, state_dir)
+    if listener is not None:
+        listener(events.Finished(destination=str(destination)))

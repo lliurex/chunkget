@@ -348,7 +348,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Repite sobre `F`/`P` hasta `max_retries` pasadas, con la espera `min(2×2^(n−1), 60)` s mediante una función de pausa inyectable.
   - Hecho cuando: tests comprueban que: un fragmento que falla una vez y luego se sirve bien termina en `C`; las esperas solicitadas son 2, 4, 8, 16, 32; con un fragmento siempre corrupto se lanza `RetriesExhaustedError` (7) tras exactamente 1 pasada inicial + 5 de reintento, con el nº de fragmentos fallidos en el mensaje; y con `max_retries=0` no hay reintentos.
 
-- [ ] **T51 — Validación del hash global**
+- [x] **T51 — Validación del hash global**
   - RF/RNF: RF11
   - Depende de: T50, T12
   - Con todos los fragmentos en `C`, calcula el hash del fichero y lo compara con `global_hash`. Éxito → `status = completed`; fallo → `status = global_check_failed` y `GlobalHashMismatchError` (8).
