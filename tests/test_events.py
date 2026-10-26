@@ -12,6 +12,7 @@ EVENTS = [
     (events.GlobalCheckStarted, ("algorithm",), ("sha256",)),
     (events.Finished, ("destination",), ("/tmp/image.iso",)),
     (events.ManifestSaved, ("path",), ("/tmp/image.iso.chunkget.manifest",)),
+    (events.StaleStateDiscarded, ("destination",), ("/tmp/image.iso",)),
 ]
 
 

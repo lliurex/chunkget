@@ -47,3 +47,10 @@ class ManifestSaved:
     """A manifest downloaded from a URL is available as a local file."""
 
     path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class StaleStateDiscarded:
+    """A saved state was dropped because its destination no longer exists."""
+
+    destination: str

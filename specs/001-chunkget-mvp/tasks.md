@@ -384,7 +384,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: tests comprueban que una descarga con `size = 0` crea un fichero vacío y valida el hash global sin pedir fragmentos, y que un fichero menor que `chunk_size` se descarga con una única petición.
 
-- [ ] **T58 — `restart` y estado obsoleto**
+- [x] **T58 — `restart` y estado obsoleto**
   - RF/RNF: RF8, D14
   - Depende de: T52
   - Hecho cuando: tests comprueban que `restart=True` descarta el estado y vuelve a descargar todos los fragmentos, y que un estado cuyo destino ya no existe se descarta con un evento de aviso y se hace una descarga nueva.

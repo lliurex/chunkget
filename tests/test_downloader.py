@@ -1374,3 +1374,82 @@ def test_file_of_exactly_one_chunk(tmp_path, http_server):
     downloader.download(manifest_path, destination, state_dir, timeout=5)
     assert destination.read_bytes() == data
     assert [r.range for r in http_server.requests] == ["bytes=0-99"]
+
+
+# --- restart and stale state (T58) ---
+
+
+def test_restart_downloads_every_chunk_again(full_setup):
+    server = full_setup[3]
+    download(full_setup)
+    server.requests.clear()
+    download(full_setup, restart=True, overwrite=True)
+    assert len(chunk_requests(server)) == 5
+    assert full_setup[1].read_bytes() == CONTENT
+    assert saved_chunk_states(full_setup) == "CCCCC"
+
+
+def test_restart_discards_the_saved_state(full_setup):
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(2))
+    assert saved_chunk_states(full_setup) == "CCCPP"
+    full_setup[3].requests.clear()
+    seen = []
+
+    def listener(event):
+        if isinstance(event, events.PassStarted):
+            seen.append(saved_chunk_states(full_setup))
+
+    download(full_setup, restart=True, overwrite=True, listener=listener)
+    assert seen == ["PPPPP"]
+    assert len(chunk_requests(full_setup[3])) == 5
+
+
+def test_restart_still_asks_before_replacing_the_destination(full_setup):
+    download(full_setup)
+    full_setup[3].requests.clear()
+    with pytest.raises(DestinationExistsError):
+        download(full_setup, restart=True)
+    assert chunk_requests(full_setup[3]) == []
+    assert saved_chunk_states(full_setup) == "CCCCC"
+
+
+def test_restart_replaces_a_wrong_size_destination_instead_of_failing(full_setup):
+    download(full_setup)
+    full_setup[1].write_bytes(b"short")
+    with pytest.raises(StateInvalidError):
+        download(full_setup)
+    download(full_setup, restart=True, overwrite=True)
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_restart_without_a_state_is_a_new_download(full_setup):
+    download(full_setup, restart=True)
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_state_whose_destination_is_gone_is_discarded_with_a_warning(full_setup):
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(2))
+    full_setup[1].unlink()
+    full_setup[3].requests.clear()
+    received = []
+    download(full_setup, listener=received.append)
+    assert events.StaleStateDiscarded(destination=str(full_setup[1])) in received
+    assert len(chunk_requests(full_setup[3])) == 5
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_no_warning_when_the_state_is_resumed_or_new(full_setup):
+    received = []
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(1))
+    download(full_setup, listener=received.append)
+    assert not any(isinstance(e, events.StaleStateDiscarded) for e in received)
+
+
+def test_no_warning_on_restart(full_setup):
+    download(full_setup)
+    received = []
+    download(full_setup, restart=True, overwrite=True, listener=received.append)
+    assert not any(isinstance(e, events.StaleStateDiscarded) for e in received)

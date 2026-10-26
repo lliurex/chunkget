@@ -104,7 +104,7 @@ def _destination_size(destination):
 
 
 def prepare_download(
-    loaded, destination, state_dir, restart=False, overwrite=False
+    loaded, destination, state_dir, restart=False, overwrite=False, listener=None
 ):
     """Prepare the destination and the state of a download (D14).
 
@@ -112,15 +112,18 @@ def prepare_download(
     and has already created ``state_dir``. Depending on the scenario:
 
     - new: the destination is created and a state with every chunk pending.
-    - new_discarding_state: the same, replacing the stale state.
+    - new_discarding_state: the same, replacing the old state. If the
+      destination is gone the state is stale and ``StaleStateDiscarded``
+      is sent to ``listener``.
     - needs_confirmation: ``DestinationExistsError``, nothing is changed.
     - inconsistent: ``StateInvalidError``, nothing is changed.
     - resume: the saved state is loaded; the destination is left as it is.
     """
     key = state.state_key(loaded.global_hash, destination)
     state_exists = state.state_path(state_dir, key).exists()
+    destination_size = _destination_size(destination)
     scenario = decide_scenario(
-        _destination_size(destination),
+        destination_size,
         state_exists,
         loaded.size,
         restart=restart,
@@ -139,6 +142,12 @@ def prepare_download(
         )
     if scenario is Scenario.RESUME:
         return state.load_state(state_dir, loaded, destination)
+    if (
+        scenario is Scenario.NEW_DISCARDING_STATE
+        and destination_size is None
+        and listener is not None
+    ):
+        listener(events.StaleStateDiscarded(destination=str(destination)))
     # The destination is prepared first: with no space left no state is saved.
     storage.prepare_destination(destination, loaded.size)
     fresh = state.new_state(loaded, destination)
@@ -323,7 +332,12 @@ def download(
     key = state.state_key(loaded.global_hash, destination)
     with state.lock_download(directory, key):
         current = prepare_download(
-            loaded, destination, directory, restart=restart, overwrite=overwrite
+            loaded,
+            destination,
+            directory,
+            restart=restart,
+            overwrite=overwrite,
+            listener=listener,
         )
         run_passes(
             loaded, destination, current, directory, timeout, max_retries, sleep, listener
