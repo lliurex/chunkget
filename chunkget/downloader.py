@@ -4,6 +4,7 @@ import enum
 import os
 import re
 import time
+from pathlib import Path
 
 from chunkget import config, events, hashing, http, manifest, state, storage
 from chunkget.errors import (
@@ -216,11 +217,6 @@ def run_pass(loaded, destination, current, state_dir, timeout, listener=None):
     return False
 
 
-def retry_delay(attempt):
-    """Seconds to wait before retry pass ``attempt`` (1-based): 2, 4, 8… up to 60."""
-    return min(config.RETRY_DELAY_BASE * 2 ** (attempt - 1), config.RETRY_DELAY_MAX)
-
-
 def run_passes(
     loaded,
     destination,
@@ -245,7 +241,7 @@ def run_passes(
         pending = _count_not_correct(current)
         if pending == 0:
             return
-        sleep(retry_delay(attempt))
+        sleep(config.retry_delay(attempt))
         if listener is not None:
             listener(
                 events.RetryStarted(
@@ -295,3 +291,42 @@ def verify_global_hash(loaded, destination, current, state_dir, listener=None):
     state.save_state(current, state_dir)
     if listener is not None:
         listener(events.Finished(destination=str(destination)))
+
+
+def download(
+    source,
+    destination=None,
+    state_dir=None,
+    timeout=config.DEFAULT_TIMEOUT,
+    max_retries=config.DEFAULT_MAX_RETRIES,
+    restart=False,
+    overwrite=False,
+    manifest_file=None,
+    overwrite_manifest=False,
+    sleep=None,
+    listener=None,
+):
+    """Download the file described by the manifest ``source`` (RF6 to RF11).
+
+    ``source`` is a local path or an ``http(s)`` URL. Returns the path of
+    the destination. A download that was interrupted is resumed: only the
+    chunks not verified yet are requested (RF8). The questions to the user
+    are already answered in ``overwrite`` and ``overwrite_manifest``.
+    """
+    loaded = obtain_manifest(
+        source, timeout, manifest_file, overwrite_manifest, listener
+    )
+    if destination is None:
+        destination = config.default_destination(loaded.name)
+    destination = Path(destination)
+    directory = state.ensure_state_dir(state_dir)
+    key = state.state_key(loaded.global_hash, destination)
+    with state.lock_download(directory, key):
+        current = prepare_download(
+            loaded, destination, directory, restart=restart, overwrite=overwrite
+        )
+        run_passes(
+            loaded, destination, current, directory, timeout, max_retries, sleep, listener
+        )
+        verify_global_hash(loaded, destination, current, directory, listener)
+    return destination

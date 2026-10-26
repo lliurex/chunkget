@@ -354,7 +354,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Con todos los fragmentos en `C`, calcula el hash del fichero y lo compara con `global_hash`. Éxito → `status = completed`; fallo → `status = global_check_failed` y `GlobalHashMismatchError` (8).
   - Hecho cuando: tests comprueban ambos caminos y el valor de `status` leído desde disco; para el fallo se usa un manifest con `global_hash` alterado y los fragmentos correctos.
 
-- [ ] **T52 — Reanudación**
+- [x] **T52 — Reanudación**
   - RF/RNF: RF8, HU-4, criterio «se reanuda»
   - Depende de: T51, T47
   - Hecho cuando: un test descarga con un servidor que corta tras 2 de 5 fragmentos, vuelve a lanzar la descarga y comprueba, con el registro del servidor, que solo se piden los 3 fragmentos pendientes, y que el fichero final es idéntico al original.

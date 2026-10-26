@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from chunkget import downloader, manifest_builder
@@ -943,3 +945,136 @@ def test_empty_file_is_verified_without_chunks(tmp_path):
 def test_chunks_not_correct_is_a_programming_error(pass_setup):
     with pytest.raises(ValueError):
         verify(pass_setup)
+
+
+# --- The whole download and resuming it (T52) ---
+
+from chunkget.errors import InterruptedByUser
+
+
+@pytest.fixture
+def full_setup(tmp_path, http_server):
+    """(manifest path, destination, state_dir, server): 5 chunks of 50 bytes."""
+    source = tmp_path / "image.iso"
+    source.write_bytes(CONTENT)
+    url = http_server.serve("/image.iso", CONTENT)
+    manifest = manifest_builder.build_manifest(source, url, chunk_size=50)
+    manifest_path = tmp_path / "image.iso.chunkget.manifest"
+    manifest_path.write_bytes(manifest.to_json().encode("utf-8"))
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    return manifest_path, tmp_path / "out.iso", state_dir, http_server
+
+
+def download(full_setup, **kwargs):
+    manifest_path, destination, state_dir, _server = full_setup
+    options = dict(timeout=5, max_retries=0, sleep=lambda seconds: None)
+    options.update(kwargs)
+    return downloader.download(manifest_path, destination, state_dir, **options)
+
+
+def chunk_requests(server):
+    return [r.range for r in server.requests if r.path == "/image.iso"]
+
+
+def test_download_from_scratch(full_setup):
+    result = download(full_setup)
+    assert result == full_setup[1]
+    assert full_setup[1].read_bytes() == CONTENT
+    assert len(chunk_requests(full_setup[3])) == 5
+
+
+def test_download_leaves_the_state_completed(full_setup):
+    download(full_setup)
+    [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
+    assert state_module.from_json(state_file.read_bytes()).status == "completed"
+
+
+def test_resume_after_an_interruption_requests_only_the_pending_chunks(full_setup):
+    server = full_setup[3]
+
+    def interrupt(event):
+        if isinstance(event, events.ChunkDone) and event.index == 1:
+            raise InterruptedByUser("stop")
+
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt)
+    server.requests.clear()
+    download(full_setup)
+    assert chunk_requests(server) == ["bytes=100-149", "bytes=150-199", "bytes=200-249"]
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_resume_after_the_server_cut_the_connection(full_setup):
+    server = full_setup[3]
+
+    def cut_after_two_chunks(event):
+        if isinstance(event, events.ChunkDone) and event.index == 1:
+            server.cut_connection_after("/image.iso", 10)
+
+    with pytest.raises(RetriesExhaustedError):
+        download(full_setup, listener=cut_after_two_chunks)
+    assert full_setup[1].read_bytes()[:100] == CONTENT[:100]
+    server.cuts.clear()
+    server.requests.clear()
+    download(full_setup)
+    assert chunk_requests(server) == ["bytes=100-149", "bytes=150-199", "bytes=200-249"]
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_resume_keeps_the_chunks_already_correct(full_setup):
+    server = full_setup[3]
+
+    def interrupt(event):
+        if isinstance(event, events.ChunkDone) and event.index == 1:
+            raise InterruptedByUser("stop")
+
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt)
+    # Serve other bytes: the finished chunks must not be asked for again.
+    server.resources["/image.iso"] = bytes(250)
+    with pytest.raises(RetriesExhaustedError):
+        download(full_setup)
+    assert full_setup[1].read_bytes()[:100] == CONTENT[:100]
+
+
+def test_download_takes_the_manifest_from_a_url(full_setup, tmp_path, monkeypatch):
+    manifest_path, destination, state_dir, server = full_setup
+    url = server.serve("/m.manifest", manifest_path.read_bytes())
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    downloader.download(
+        url, destination, state_dir, timeout=5, max_retries=0
+    )
+    assert destination.read_bytes() == CONTENT
+    assert (work / "image.iso.chunkget.manifest").exists()
+
+
+def test_destination_defaults_to_the_name_in_the_manifest(full_setup, tmp_path, monkeypatch):
+    manifest_path, _destination, state_dir, _server = full_setup
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    result = downloader.download(manifest_path, None, state_dir, timeout=5, max_retries=0)
+    assert result == Path("image.iso")
+    assert (work / "image.iso").read_bytes() == CONTENT
+
+
+def test_download_holds_the_lock(full_setup):
+    manifest_path, destination, state_dir, _server = full_setup
+    manifest = downloader.resolve_manifest(manifest_path)
+    key = state_module.state_key(manifest.global_hash, destination)
+    from chunkget.errors import AlreadyRunningError
+
+    with state_module.lock_download(state_dir, key):
+        with pytest.raises(AlreadyRunningError):
+            download(full_setup)
+    assert not destination.exists()
+
+
+def test_download_creates_the_state_dir(full_setup, tmp_path):
+    manifest_path, destination, _dir, _server = full_setup
+    new_dir = tmp_path / "does" / "not" / "exist"
+    downloader.download(manifest_path, destination, new_dir, timeout=5, max_retries=0)
+    assert new_dir.is_dir()
