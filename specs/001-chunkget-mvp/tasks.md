@@ -404,7 +404,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - `publisher.py`: construye el manifest y lo escribe en la ruta de salida (por defecto `./<name>.chunkget.manifest`) al final del proceso.
   - Hecho cuando: un test genera un manifest de un fichero con la URL dada y `load_manifest_file` lo carga con los hashes correctos.
 
-- [ ] **T61 — Sobrescritura del manifest de salida**
+- [x] **T61 — Sobrescritura del manifest de salida**
   - RF/RNF: RF5
   - Depende de: T60, T04
   - Si existe y no hay `overwrite`, lanza `OutputExistsError`. Con `overwrite=True` lo trunca y escribe como si no existiera. La escritura se hace al final, tras calcular todo.

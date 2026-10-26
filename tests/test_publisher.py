@@ -112,3 +112,79 @@ def test_existing_output_is_not_silently_replaced(source, tmp_path):
     with pytest.raises(OutputExistsError):
         publisher.make_manifest(source, URL, output, chunk_size=100)
     assert output.read_text() == "previous"
+
+
+# --- Overwriting the output manifest (T61) ---
+
+from chunkget.errors import ExitCode, InterruptedByUser, OutputExistsError
+
+
+def test_without_overwrite_the_existing_file_does_not_change(source, tmp_path):
+    output = tmp_path / "m"
+    output.write_bytes(b"previous content")
+    with pytest.raises(OutputExistsError) as excinfo:
+        publisher.make_manifest(source, URL, output, chunk_size=100, overwrite=False)
+    assert excinfo.value.exit_code == ExitCode.USER_DECLINED
+    assert output.read_bytes() == b"previous content"
+
+
+def test_overwrite_defaults_to_false(source, tmp_path):
+    output = tmp_path / "m"
+    output.write_bytes(b"previous content")
+    with pytest.raises(OutputExistsError):
+        publisher.make_manifest(source, URL, output, chunk_size=100)
+
+
+def test_with_overwrite_the_file_is_replaced(source, tmp_path):
+    output = tmp_path / "m"
+    output.write_bytes(b"previous content " * 1000)  # longer than the manifest
+    publisher.make_manifest(source, URL, output, chunk_size=100, overwrite=True)
+    loaded = manifest.load_manifest_file(output)
+    assert loaded.size == 250
+    assert output.read_bytes() == loaded.to_json().encode("utf-8")
+
+
+def test_with_overwrite_and_no_existing_file_it_is_just_written(source, tmp_path):
+    output = tmp_path / "m"
+    publisher.make_manifest(source, URL, output, chunk_size=100, overwrite=True)
+    assert manifest.load_manifest_file(output).size == 250
+
+
+def test_overwrite_with_the_same_content_is_harmless(source, tmp_path):
+    output = tmp_path / "m"
+    publisher.make_manifest(source, URL, output, chunk_size=100)
+    first = output.read_bytes()
+    publisher.make_manifest(source, URL, output, chunk_size=100, overwrite=True)
+    assert output.read_bytes() == first
+
+
+def test_failure_while_computing_leaves_the_previous_manifest_intact(source, tmp_path):
+    output = tmp_path / "m"
+    output.write_bytes(b"previous content")
+
+    def fail_midway(event):
+        if event.index == 1:
+            raise InterruptedByUser("stop")
+
+    with pytest.raises(InterruptedByUser):
+        publisher.make_manifest(
+            source, URL, output, chunk_size=100, overwrite=True, listener=fail_midway
+        )
+    assert output.read_bytes() == b"previous content"
+
+
+def test_the_replaced_file_is_written_only_after_everything_is_computed(
+    source, tmp_path
+):
+    output = tmp_path / "m"
+    output.write_bytes(b"previous content")
+    seen = []
+
+    def listener(event):
+        seen.append(output.read_bytes())
+
+    publisher.make_manifest(
+        source, URL, output, chunk_size=100, overwrite=True, listener=listener
+    )
+    assert seen == [b"previous content"] * 3
+    assert output.read_bytes() != b"previous content"
