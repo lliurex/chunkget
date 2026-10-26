@@ -48,11 +48,22 @@ def build_parser():
         metavar="URL",
         help=_("URL the file will be downloaded from (asked for if missing)"),
     )
+    place = make.add_mutually_exclusive_group()
+    place.add_argument(
+        "--download-to",
+        metavar="PATH",
+        help=_("with a URL source: download the file to PATH"),
+    )
+    place.add_argument(
+        "--local-file",
+        metavar="PATH",
+        help=_("with a URL source: use the existing local file PATH"),
+    )
     make.add_argument(
         "-y",
         "--yes",
         action="store_true",
-        help=_("answer yes when asked whether to overwrite the manifest"),
+        help=_("answer yes when asked whether to overwrite a file"),
     )
     make.add_argument(
         "--chunk-size",
@@ -142,7 +153,12 @@ def resolve_options(args):
 
 def _make_manifest(args):
     if downloader.is_url(args.source):
-        return _not_implemented()
+        return _make_manifest_from_url(args)
+    for option, value in (("--download-to", args.download_to), ("--local-file", args.local_file)):
+        if value is not None:
+            raise UsageError(
+                _("{option} can only be used when SOURCE is a URL").format(option=option)
+            )
     url = args.url
     if url is None:
         if not _is_interactive():
@@ -154,10 +170,7 @@ def _make_manifest(args):
         url = _ask_url
     else:
         url = _checked_url(url)
-    output = args.output or config.default_manifest_path(os.path.basename(args.source))
-    overwrite = os.path.lexists(output)
-    if overwrite and not args.yes:
-        _confirm_overwrite(output)
+    output, overwrite = _output_choice(args, args.source)
     written = publisher.make_manifest(
         args.source,
         url,
@@ -170,6 +183,94 @@ def _make_manifest(args):
     return ExitCode.OK
 
 
+def _make_manifest_from_url(args):
+    """``make-manifest`` for a source that is a URL (RF3)."""
+    if args.url is not None:
+        raise UsageError(_("--url cannot be used when SOURCE is already a URL"))
+    http.validate_url(args.source)
+    download_to, local_file = args.download_to, args.local_file
+    if download_to is None and local_file is None:
+        if not _is_interactive():
+            raise UsageError(
+                _(
+                    "SOURCE is a URL: use --download-to or --local-file "
+                    "(there is no terminal to ask)"
+                )
+            )
+        download_to, local_file = _ask_download_or_local()
+    overwrite_download = False
+    if download_to is not None:
+        if os.path.lexists(download_to) and not args.yes:
+            _confirm_overwrite(download_to)
+        overwrite_download = True
+        print(
+            _(
+                "warning: the downloaded file cannot be validated, because there "
+                "is no manifest yet; the manifest will describe what is received"
+            ),
+            file=sys.stderr,
+        )
+    output, overwrite = _output_choice(args, download_to or local_file)
+    written = publisher.make_manifest_from_url(
+        args.source,
+        output,
+        download_to=download_to,
+        local_file=local_file,
+        chunk_size=args.chunk_size,
+        algorithm=args.algorithm,
+        overwrite=overwrite,
+        overwrite_download=overwrite_download,
+        timeout=args.timeout,
+        max_retries=args.max_retries,
+    )
+    print(_("Manifest written: {path}").format(path=written))
+    return ExitCode.OK
+
+
+def _output_choice(args, file_path):
+    """Return ``(output path, overwrite)``, asking before replacing it (RF5).
+
+    The default output is named after ``file_path``. The question is asked
+    before the file is read or downloaded, so a refusal wastes no work.
+    """
+    output = args.output or config.default_manifest_path(os.path.basename(file_path))
+    exists = os.path.lexists(output)
+    if exists and not args.yes:
+        _confirm_overwrite(output)
+    return output, exists
+
+
+def _matches(answer, *words):
+    """True if ``answer`` is one of ``words`` or their translations."""
+    accepted = set(words) | {_(word) for word in words}
+    return answer.lower() in {word.lower() for word in accepted}
+
+
+def _ask_download_or_local():
+    """Ask whether to download the file or use a local one (RF3).
+
+    Returns ``(download_to, local_file)``, one of them None.
+    """
+    while True:
+        answer = _ask(_("Download the file or use an existing local file? [d/l] "))
+        if answer is None:
+            raise UsageError(_("no answer to whether to download or use a local file"))
+        if _matches(answer, "d", "download"):
+            return _ask_path(_("Path to download the file to: ")), None
+        if _matches(answer, "l", "local"):
+            return None, _ask_path(_("Path of the local file: "))
+        print(_("please answer d (download) or l (local file)"), file=sys.stderr)
+
+
+def _ask_path(prompt):
+    while True:
+        answer = _ask(prompt)
+        if answer is None:
+            raise UsageError(_("no path was given"))
+        if answer:
+            return answer
+
+
 def _confirm_overwrite(path):
     """Ask before replacing ``path`` (RF5); declining is ``UserDeclinedError``.
 
@@ -177,8 +278,7 @@ def _confirm_overwrite(path):
     """
     if _is_interactive():
         answer = _ask(_("{path} already exists. Overwrite it? [y/N] ").format(path=path))
-        yes = {"y", "yes", _("y").lower(), _("yes").lower()}
-        if answer is not None and answer.lower() in yes:
+        if answer is not None and _matches(answer, "y", "yes"):
             return
     raise UserDeclinedError(_("not overwriting {path}").format(path=path))
 

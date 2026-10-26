@@ -460,7 +460,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Pregunta si desea sobrescribir; `-y` responde sí; si la respuesta es no o no hay terminal, código 4.
   - Hecho cuando: tests comprueban respuesta afirmativa (fichero reemplazado), negativa (código 4 y fichero intacto), `-y`, y ausencia de terminal (código 4).
 
-- [ ] **T70 — `make-manifest` con origen URL**
+- [x] **T70 — `make-manifest` con origen URL**
   - RF/RNF: RF3
   - Depende de: T68, T63
   - Pregunta «descargar o usar fichero local», pide la ruta correspondiente, y admite `--download-to` y `--local-file`. `--url` con un origen URL termina con 2. Avisa de que la descarga no se puede validar.
