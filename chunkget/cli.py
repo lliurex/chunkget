@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import signal
 import sys
 
 import chunkget
@@ -11,6 +12,7 @@ from chunkget.errors import (
     DestinationExistsError,
     ExitCode,
     GlobalHashMismatchError,
+    InterruptedByUser,
     OutputExistsError,
     RetriesExhaustedError,
     SourceError,
@@ -537,6 +539,7 @@ def main(argv=None):
     except SystemExit as stop:
         # argparse exits for --help, --version and usage errors (code 2).
         return 0 if stop.code is None else stop.code
+    previous_handlers = _install_signal_handlers()
     try:
         resolve_options(args)
         return int(args.handler(args))
@@ -551,6 +554,36 @@ def main(argv=None):
             )
         )
         return int(ExitCode.UNEXPECTED)
+    finally:
+        _restore_signal_handlers(previous_handlers)
+
+
+def _raise_interruption(signum, frame):
+    if signum == signal.SIGTERM:
+        raise InterruptedByUser(
+            _("terminated by SIGTERM"), exit_code=ExitCode.TERMINATED
+        )
+    raise InterruptedByUser(_("interrupted by the user"))
+
+
+def _install_signal_handlers():
+    """Turn SIGINT and SIGTERM into ``InterruptedByUser`` (D9).
+
+    Returns the previous handlers. Handlers can only be set from the main
+    thread; elsewhere nothing is installed.
+    """
+    previous = {}
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous[signum] = signal.signal(signum, _raise_interruption)
+        except ValueError:
+            pass
+    return previous
+
+
+def _restore_signal_handlers(previous):
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
 
 
 def _error(message):

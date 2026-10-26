@@ -4,6 +4,7 @@ import collections
 import dataclasses
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _RANGE_RE = re.compile(r"bytes=(\d+)-(\d*)")
@@ -26,6 +27,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.server.requests.append(
             RequestRecord(self.path, dict(self.headers.items()))
         )
+        hook = self.server.hooks.get(self.path)
+        if hook is not None:
+            hook(sum(1 for r in self.server.requests if r.path == self.path))
+        delay = self.server.delays.get(self.path)
+        if delay:
+            time.sleep(delay)
         statuses = self.server.statuses.get(self.path)
         if statuses:
             self._send(statuses.popleft(), b"", {})
@@ -119,6 +126,8 @@ class HttpTestServer:
         self.encodings = {}
         self.statuses = {}
         self.redirects = {}
+        self.hooks = {}
+        self.delays = {}
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._httpd.daemon_threads = True
         self._httpd.resources = self.resources
@@ -130,6 +139,8 @@ class HttpTestServer:
         self._httpd.encodings = self.encodings
         self._httpd.statuses = self.statuses
         self._httpd.redirects = self.redirects
+        self._httpd.hooks = self.hooks
+        self._httpd.delays = self.delays
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, kwargs={"poll_interval": 0.01}
         )
@@ -176,6 +187,14 @@ class HttpTestServer:
     def redirect(self, path, location):
         """Answer requests for ``path`` with a 302 to ``location``."""
         self.redirects[path] = location
+
+    def on_request(self, path, callback):
+        """Call ``callback(n)`` when the ``n``-th request for ``path`` arrives."""
+        self.hooks[path] = callback
+
+    def delay(self, path, seconds):
+        """Wait ``seconds`` before answering each request for ``path``."""
+        self.delays[path] = seconds
 
     def start(self):
         self._thread.start()

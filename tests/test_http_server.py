@@ -269,3 +269,18 @@ def test_cut_can_be_limited_to_the_first_requests(http_server):
                 response.read()
     with fetch(url) as response:
         assert response.read() == DATA
+
+
+def test_on_request_hook_and_delay(http_server):
+    import time
+    import urllib.request
+
+    url = http_server.serve("/f", b"data")
+    seen = []
+    http_server.on_request("/f", seen.append)
+    http_server.delay("/f", 0.2)
+    started = time.monotonic()
+    urllib.request.urlopen(url, timeout=5).read()
+    urllib.request.urlopen(url, timeout=5).read()
+    assert seen == [1, 2]
+    assert time.monotonic() - started >= 0.4

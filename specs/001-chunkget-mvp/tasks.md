@@ -489,7 +489,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Muestra los mensajes de 7.4 para reintentos agotados (código 7) y fallo del hash global (código 8), y el resto de códigos de 7.5 propios de `download` (3, 5, 6, 9, 10, 11, 12, 13).
   - Hecho cuando: tests con el servidor de pruebas comprueban código y mensaje en stderr para cada uno de esos códigos.
 
-- [ ] **T75 — Señales**
+- [x] **T75 — Señales**
   - RF/RNF: caso «Ctrl-C», D9
   - Depende de: T72, T55
   - La CLI convierte `SIGINT` y `SIGTERM` en `InterruptedByUser` y devuelve 130 y 143.
