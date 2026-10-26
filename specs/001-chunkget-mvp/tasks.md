@@ -410,7 +410,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Si existe y no hay `overwrite`, lanza `OutputExistsError`. Con `overwrite=True` lo trunca y escribe como si no existiera. La escritura se hace al final, tras calcular todo.
   - Hecho cuando: tests comprueban: sin `overwrite` el fichero existente no cambia; con `overwrite` se reemplaza; y si el cálculo falla (origen ilegible a mitad), el manifest anterior queda intacto.
 
-- [ ] **T62 — Errores del origen local**
+- [x] **T62 — Errores del origen local**
   - RF/RNF: RF4
   - Depende de: T60
   - Hecho cuando: tests comprueban `SourceError` (3) para: ruta inexistente, directorio, sin permiso de lectura; y que no se crea ningún fichero de salida.

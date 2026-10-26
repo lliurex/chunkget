@@ -188,3 +188,74 @@ def test_the_replaced_file_is_written_only_after_everything_is_computed(
     )
     assert seen == [b"previous content"] * 3
     assert output.read_bytes() != b"previous content"
+
+
+# --- Errors of a local source (T62) ---
+
+import os
+
+from chunkget.errors import SourceError
+
+
+def make(source, tmp_path, **kwargs):
+    return publisher.make_manifest(source, URL, tmp_path / "out.manifest", **kwargs)
+
+
+def assert_source_error(error, tmp_path):
+    assert error.value.exit_code == ExitCode.SOURCE_ERROR
+    assert str(error.value)
+    assert list(tmp_path.glob("*.manifest")) == []
+
+
+def test_missing_source_is_a_source_error(tmp_path):
+    with pytest.raises(SourceError) as error:
+        make(tmp_path / "missing.iso", tmp_path)
+    assert_source_error(error, tmp_path)
+    assert "missing.iso" in str(error.value)
+
+
+def test_directory_as_source_is_a_source_error(tmp_path):
+    directory = tmp_path / "a_directory"
+    directory.mkdir()
+    with pytest.raises(SourceError) as error:
+        make(directory, tmp_path)
+    assert_source_error(error, tmp_path)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
+def test_unreadable_source_is_a_source_error(source, tmp_path):
+    source.chmod(0)
+    try:
+        with pytest.raises(SourceError) as error:
+            make(source, tmp_path)
+    finally:
+        source.chmod(0o644)
+    assert_source_error(error, tmp_path)
+
+
+def test_missing_source_does_not_touch_an_existing_output(tmp_path):
+    output = tmp_path / "out.manifest"
+    output.write_bytes(b"previous")
+    with pytest.raises(SourceError):
+        make(tmp_path / "missing.iso", tmp_path, overwrite=True)
+    assert output.read_bytes() == b"previous"
+
+
+def test_error_message_is_translatable(tmp_path):
+    from chunkget import i18n
+
+    class Shout:
+        def gettext(self, text):
+            return "«T»" + text
+
+        def ngettext(self, one, many, n):
+            return one.upper() if n == 1 else many.upper()
+
+    previous = i18n.get_translation()
+    i18n.set_translation(Shout())
+    try:
+        with pytest.raises(SourceError) as error:
+            make(tmp_path / "missing.iso", tmp_path)
+    finally:
+        i18n.set_translation(previous)
+    assert str(error.value).startswith("«T»cannot read")

@@ -3,6 +3,8 @@
 import os
 
 from chunkget import config, events, hashing
+from chunkget.errors import SourceError
+from chunkget.i18n import _
 from chunkget.manifest import PROTOCOL_VERSION, Chunk, Manifest, validate
 
 
@@ -58,7 +60,14 @@ def build_manifest(
         algorithm = config.DEFAULT_ALGORITHM
     config.validate_chunk_size(chunk_size)
     hashing.validate_algorithm(algorithm)
-    chunks, global_hash = compute_chunks(path, chunk_size, algorithm, listener)
+    try:
+        chunks, global_hash = compute_chunks(path, chunk_size, algorithm, listener)
+    except OSError as error:
+        raise SourceError(
+            _("cannot read {path}: {reason}").format(
+                path=path, reason=error.strerror or error
+            )
+        ) from None
     manifest = Manifest(
         protocol_version=PROTOCOL_VERSION,
         name=os.path.basename(path),
