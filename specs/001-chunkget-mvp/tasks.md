@@ -454,7 +454,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Con `--url` genera sin preguntar; sin `--url` solicita la URL como último paso (stdin simulada) y la vuelve a pedir si es vacía o inválida; sin terminal ni `--url` termina con 2. Imprime `Manifest written: <ruta>` en stdout.
   - Hecho cuando: tests comprueban los cuatro caminos (con `--url`, URL pedida, URL inválida seguida de válida, sin terminal) y que la pregunta aparece en stderr.
 
-- [ ] **T69 — `make-manifest`: sobrescritura**
+- [x] **T69 — `make-manifest`: sobrescritura**
   - RF/RNF: RF5
   - Depende de: T68, T61
   - Pregunta si desea sobrescribir; `-y` responde sí; si la respuesta es no o no hay terminal, código 4.

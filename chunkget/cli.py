@@ -1,11 +1,18 @@
 """Command line interface: the only module that talks to the terminal."""
 
 import argparse
+import os
 import sys
 
 import chunkget
 from chunkget import config, downloader, hashing, http, publisher
-from chunkget.errors import ChunkgetError, ExitCode, SourceError, UsageError
+from chunkget.errors import (
+    ChunkgetError,
+    ExitCode,
+    SourceError,
+    UsageError,
+    UserDeclinedError,
+)
 from chunkget.i18n import _
 
 
@@ -40,6 +47,12 @@ def build_parser():
         "--url",
         metavar="URL",
         help=_("URL the file will be downloaded from (asked for if missing)"),
+    )
+    make.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help=_("answer yes when asked whether to overwrite the manifest"),
     )
     make.add_argument(
         "--chunk-size",
@@ -141,15 +154,33 @@ def _make_manifest(args):
         url = _ask_url
     else:
         url = _checked_url(url)
+    output = args.output or config.default_manifest_path(os.path.basename(args.source))
+    overwrite = os.path.lexists(output)
+    if overwrite and not args.yes:
+        _confirm_overwrite(output)
     written = publisher.make_manifest(
         args.source,
         url,
-        args.output,
+        output,
         chunk_size=args.chunk_size,
         algorithm=args.algorithm,
+        overwrite=overwrite,
     )
     print(_("Manifest written: {path}").format(path=written))
     return ExitCode.OK
+
+
+def _confirm_overwrite(path):
+    """Ask before replacing ``path`` (RF5); declining is ``UserDeclinedError``.
+
+    No terminal, no answer or anything but yes counts as a refusal.
+    """
+    if _is_interactive():
+        answer = _ask(_("{path} already exists. Overwrite it? [y/N] ").format(path=path))
+        yes = {"y", "yes", _("y").lower(), _("yes").lower()}
+        if answer is not None and answer.lower() in yes:
+            return
+    raise UserDeclinedError(_("not overwriting {path}").format(path=path))
 
 
 def _is_interactive():
