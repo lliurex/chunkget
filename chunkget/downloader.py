@@ -344,6 +344,18 @@ def download(
             overwrite=overwrite,
             listener=listener,
         )
+        if listener is not None:
+            listener(
+                events.DownloadStarted(
+                    name=loaded.name,
+                    size=loaded.size,
+                    done_bytes=sum(
+                        chunk.end - chunk.start
+                        for chunk, char in zip(loaded.chunks, current.chunk_states)
+                        if char == state.CORRECT
+                    ),
+                )
+            )
         run_passes(
             loaded, destination, current, directory, timeout, max_retries, sleep, listener
         )

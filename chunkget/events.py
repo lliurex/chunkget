@@ -54,3 +54,12 @@ class StaleStateDiscarded:
     """A saved state was dropped because its destination no longer exists."""
 
     destination: str
+
+
+@dataclasses.dataclass(frozen=True)
+class DownloadStarted:
+    """The download is prepared; ``done_bytes`` are already verified (a resume)."""
+
+    name: str
+    size: int
+    done_bytes: int

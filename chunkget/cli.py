@@ -5,7 +5,7 @@ import os
 import sys
 
 import chunkget
-from chunkget import config, downloader, hashing, http, publisher
+from chunkget import config, downloader, events, hashing, http, publisher
 from chunkget.errors import (
     ChunkgetError,
     ExitCode,
@@ -13,7 +13,7 @@ from chunkget.errors import (
     UsageError,
     UserDeclinedError,
 )
-from chunkget.i18n import _
+from chunkget.i18n import _, ngettext
 
 
 def build_parser():
@@ -317,8 +317,107 @@ def _ask_url():
             print(str(error), file=sys.stderr)
 
 
+_SIZE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+
+
+def _format_size(size):
+    """``50 B``, ``48.0 MiB``, ``3.0 GiB``: binary units, one decimal."""
+    value = float(size)
+    for unit in _SIZE_UNITS[:-1]:
+        if value < 1024:
+            break
+        value /= 1024
+    else:
+        unit = _SIZE_UNITS[-1]
+    if unit == "B":
+        return "%d B" % size
+    return "%.1f %s" % (value, unit)
+
+
+class _DownloadReporter:
+    """Turns progress events into the messages of 7.4.
+
+    Progress goes to stderr, one line per finished chunk; on a terminal the
+    same line is rewritten. The saved manifest is a result and goes to stdout.
+    """
+
+    def __init__(self):
+        self._name = ""
+        self._size = 0
+        self._done = 0
+        self._algorithm = ""
+        self._open_line = 0  # length of the progress line being rewritten
+
+    def __call__(self, event):
+        if isinstance(event, events.DownloadStarted):
+            self._name, self._size, self._done = event.name, event.size, event.done_bytes
+        elif isinstance(event, events.ManifestSaved):
+            print(_("Manifest saved: {path}").format(path=event.path))
+        elif isinstance(event, events.StaleStateDiscarded):
+            self._message(
+                _(
+                    "warning: the saved state was discarded because {path} "
+                    "no longer exists"
+                ).format(path=event.destination)
+            )
+        elif isinstance(event, events.RetryStarted):
+            self._message(
+                ngettext(
+                    "Retry pass {attempt}/{maximum}: {count} chunk pending",
+                    "Retry pass {attempt}/{maximum}: {count} chunks pending",
+                    event.pending,
+                ).format(
+                    attempt=event.attempt, maximum=event.max_retries, count=event.pending
+                )
+            )
+        elif isinstance(event, events.ChunkDone):
+            self._done += event.bytes
+            self._progress(event)
+        elif isinstance(event, events.GlobalCheckStarted):
+            self._algorithm = event.algorithm
+        elif isinstance(event, events.Finished):
+            self._message(
+                _("Global hash verified ({algorithm}).").format(algorithm=self._algorithm)
+            )
+
+    def _progress(self, event):
+        percent = 100.0 * self._done / self._size if self._size else 100.0
+        line = _(
+            "Downloading {name}: chunk {index}/{total} ({percent:.1f}%), "
+            "{done} of {size}"
+        ).format(
+            name=self._name,
+            index=event.index + 1,
+            total=event.total,
+            percent=percent,
+            done=_format_size(self._done),
+            size=_format_size(self._size),
+        )
+        if sys.stderr.isatty():
+            sys.stderr.write("\r" + line.ljust(self._open_line))
+            self._open_line = len(line)
+        else:
+            sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
+    def _message(self, text):
+        """A line of its own: it ends a progress line that is being rewritten."""
+        if self._open_line:
+            sys.stderr.write("\n")
+            self._open_line = 0
+        sys.stderr.write(text + "\n")
+        sys.stderr.flush()
+
+
 def _download(args):
-    return _not_implemented()
+    destination = downloader.download(
+        args.manifest,
+        timeout=args.timeout,
+        max_retries=args.max_retries,
+        listener=_DownloadReporter(),
+    )
+    print(_("Download completed: {path}").format(path=destination))
+    return ExitCode.OK
 
 
 def _not_implemented():

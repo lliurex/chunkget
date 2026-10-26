@@ -1552,3 +1552,22 @@ def test_is_url():
     assert downloader.is_url("ftp://example.com/m")
     assert not downloader.is_url("dir/m.manifest")
     assert not downloader.is_url("/abs/path:with-colon")
+
+
+# --- DownloadStarted event (T72) ---
+
+
+def test_download_started_reports_name_size_and_bytes_already_done(full_setup):
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(1))
+    received = []
+    download(full_setup, listener=received.append)
+    started = [e for e in received if isinstance(e, events.DownloadStarted)]
+    assert started == [events.DownloadStarted(name="image.iso", size=250, done_bytes=100)]
+
+
+def test_download_started_comes_before_any_progress(full_setup):
+    received = []
+    download(full_setup, listener=received.append)
+    assert isinstance(received[0], events.DownloadStarted)
+    assert received[0].done_bytes == 0

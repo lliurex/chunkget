@@ -471,7 +471,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T68, T64
   - Hecho cuando: tests comprueban código 3, mensaje en stderr y ausencia de fichero de salida para: fichero inexistente, URL con 404 y URL que no resuelve.
 
-- [ ] **T72 — `download`: ejecución y progreso**
+- [x] **T72 — `download`: ejecución y progreso**
   - RF/RNF: RF6, RF7, RF9
   - Depende de: T67, T52
   - Convierte los eventos en líneas de progreso en stderr (formato de 7.4), con reescritura de línea solo en terminal; imprime `Download completed: <ruta>` en stdout y `Global hash verified (<alg>).` en stderr. Con un manifest por URL imprime antes `Manifest saved: <ruta>` en stdout.
