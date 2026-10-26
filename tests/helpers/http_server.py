@@ -113,6 +113,13 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _QuietServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        # A client that goes away (a test interrupted it) is not worth a
+        # traceback on stderr, which the CLI tests compare.
+        pass
+
+
 class HttpTestServer:
     """Serves in-memory resources on an ephemeral port of 127.0.0.1."""
 
@@ -128,7 +135,7 @@ class HttpTestServer:
         self.redirects = {}
         self.hooks = {}
         self.delays = {}
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self._httpd = _QuietServer(("127.0.0.1", 0), _Handler)
         self._httpd.daemon_threads = True
         self._httpd.resources = self.resources
         self._httpd.requests = self.requests

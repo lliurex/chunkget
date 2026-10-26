@@ -495,7 +495,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - La CLI convierte `SIGINT` y `SIGTERM` en `InterruptedByUser` y devuelve 130 y 143.
   - Hecho cuando: un test envía `SIGINT` y otro `SIGTERM` al propio proceso durante una descarga lenta (servidor con retraso) y comprueba los códigos 130 y 143 y que el estado en disco es consistente.
 
-- [ ] **T76 — Todos los mensajes pasan por `gettext`**
+- [x] **T76 — Todos los mensajes pasan por `gettext`**
   - RF/RNF: RNF2, constitución §6
   - Depende de: T74, T70
   - Hecho cuando: un test inyecta una traducción que antepone `«T»` a cada cadena traducida y ejecuta los flujos de las tareas T65–T74; comprueba que toda línea de stdout/stderr que no sea una ruta, un número o un nombre propio empieza por `«T»`.
