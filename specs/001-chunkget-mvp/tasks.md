@@ -442,7 +442,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Captura `ChunkgetError` e imprime `chunkget: error: <mensaje>` en stderr; devuelve su código. Cualquier otra excepción devuelve 1.
   - Hecho cuando: tests con comandos que lanzan cada excepción (simuladas) comprueban código, línea exacta en stderr, stdout vacío, y que una excepción inesperada devuelve 1.
 
-- [ ] **T67 — Validación de opciones compartidas**
+- [x] **T67 — Validación de opciones compartidas**
   - RF/RNF: RF1.2, RF1.3
   - Depende de: T66, T09, T11
   - Conecta `--chunk-size`, `--algorithm`, `--max-retries` y `--timeout` con los validadores.

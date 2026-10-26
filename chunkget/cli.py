@@ -4,7 +4,8 @@ import argparse
 import sys
 
 import chunkget
-from chunkget.errors import ChunkgetError, ExitCode
+from chunkget import config, hashing
+from chunkget.errors import ChunkgetError, ExitCode, UsageError
 from chunkget.i18n import _
 
 
@@ -29,6 +30,20 @@ def build_parser():
         description=_("Generate the manifest that describes a file."),
     )
     make.add_argument("source", metavar="SOURCE", help=_("local file or http(s) URL"))
+    make.add_argument(
+        "--chunk-size",
+        metavar="SIZE",
+        help=_("chunk size, with an optional suffix K, M or G (default: 100M)"),
+    )
+    make.add_argument(
+        "--algorithm",
+        metavar="NAME",
+        help=_("hash algorithm: {algorithms} (default: {default})").format(
+            algorithms=", ".join(hashing.SUPPORTED_ALGORITHMS),
+            default=config.DEFAULT_ALGORITHM,
+        ),
+    )
+    _add_network_options(make)
     make.set_defaults(handler=_make_manifest)
 
     download = commands.add_parser(
@@ -39,8 +54,66 @@ def build_parser():
     download.add_argument(
         "manifest", metavar="MANIFEST", help=_("local path or http(s) URL of a manifest")
     )
+    _add_network_options(download)
     download.set_defaults(handler=_download)
     return parser
+
+
+def _add_network_options(parser):
+    parser.add_argument(
+        "--max-retries",
+        metavar="N",
+        help=_("retry passes for failed chunks, 0 to 100 (default: {default})").format(
+            default=config.DEFAULT_MAX_RETRIES
+        ),
+    )
+    parser.add_argument(
+        "--timeout",
+        metavar="SECONDS",
+        help=_("network timeout in seconds, 1 to 3600 (default: {default})").format(
+            default=config.DEFAULT_TIMEOUT
+        ),
+    )
+
+
+def _parse_int(name, text):
+    try:
+        return int(text)
+    except ValueError:
+        raise UsageError(
+            _("invalid {name} {value!r}: expected an integer").format(
+                name=name, value=text
+            )
+        ) from None
+
+
+def resolve_options(args):
+    """Replace the shared options by validated values, or their defaults (RF1.2).
+
+    Raises ``UsageError`` (code 2) for a value that is not supported (RF1.3).
+    """
+    if hasattr(args, "chunk_size"):
+        if args.chunk_size is None:
+            args.chunk_size = config.DEFAULT_CHUNK_SIZE
+        else:
+            args.chunk_size = config.validate_chunk_size(
+                config.parse_size(args.chunk_size)
+            )
+    if hasattr(args, "algorithm"):
+        if args.algorithm is None:
+            args.algorithm = config.DEFAULT_ALGORITHM
+        else:
+            hashing.validate_algorithm(args.algorithm)
+    if args.max_retries is None:
+        args.max_retries = config.DEFAULT_MAX_RETRIES
+    else:
+        args.max_retries = config.validate_max_retries(
+            _parse_int("max retries", args.max_retries)
+        )
+    if args.timeout is None:
+        args.timeout = config.DEFAULT_TIMEOUT
+    else:
+        args.timeout = config.validate_timeout(_parse_int("timeout", args.timeout))
 
 
 def _make_manifest(args):
@@ -65,6 +138,7 @@ def main(argv=None):
         # argparse exits for --help, --version and usage errors (code 2).
         return 0 if stop.code is None else stop.code
     try:
+        resolve_options(args)
         return int(args.handler(args))
     except ChunkgetError as error:
         # The message of an expected error is already translated.
