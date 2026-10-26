@@ -598,3 +598,128 @@ def test_hash_algorithm_comes_from_the_manifest(tmp_path, http_server):
     destination.write_bytes(bytes(len(CONTENT)))
     result = downloader.download_chunk(manifest, manifest.chunks[0], destination, 5)
     assert result is ChunkResult.CORRECT
+
+
+# --- One pass over the chunks (T49) ---
+
+
+@pytest.fixture
+def pass_setup(tmp_path, http_server):
+    """Five chunks of 50 bytes: (manifest, destination, state, state_dir, server)."""
+    source = tmp_path / "image.iso"
+    source.write_bytes(CONTENT)
+    url = http_server.serve("/image.iso", CONTENT)
+    manifest = manifest_builder.build_manifest(source, url, chunk_size=50)
+    destination = tmp_path / "out.iso"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    current = downloader.prepare_download(manifest, destination, state_dir)
+    return manifest, destination, current, state_dir, http_server
+
+
+def run_pass(pass_setup, listener=None):
+    manifest, destination, current, state_dir, _server = pass_setup
+    return downloader.run_pass(
+        manifest, destination, current, state_dir, 5, listener=listener
+    )
+
+
+def disk_states(pass_setup):
+    manifest, destination, _current, state_dir, _server = pass_setup
+    return state_module.load_state(state_dir, manifest, destination).chunk_states
+
+
+def test_pass_downloads_every_pending_chunk(pass_setup):
+    manifest, destination, current, _dir, _server = pass_setup
+    assert run_pass(pass_setup) is False
+    assert current.chunk_states == "CCCCC"
+    assert disk_states(pass_setup) == "CCCCC"
+    assert destination.read_bytes() == CONTENT
+
+
+def test_pass_skips_correct_chunks(pass_setup):
+    manifest, destination, current, state_dir, server = pass_setup
+    state_module.set_chunk_state(current, 0, state_module.CORRECT, state_dir)
+    state_module.set_chunk_state(current, 3, state_module.CORRECT, state_dir)
+    run_pass(pass_setup)
+    assert [r.range for r in server.requests] == [
+        "bytes=50-99",
+        "bytes=100-149",
+        "bytes=200-249",
+    ]
+
+
+def test_corrupt_chunk_is_failed_and_the_next_ones_go_on(pass_setup):
+    server = pass_setup[4]
+    server.corrupt_range("/image.iso", 50, 60)
+    assert run_pass(pass_setup) is False
+    assert disk_states(pass_setup) == "CFCCC"
+    assert len(server.requests) == 5
+
+
+def test_state_on_disk_is_updated_after_each_chunk(pass_setup):
+    pass_setup[4].corrupt_range("/image.iso", 50, 60)
+    seen = []
+
+    def listener(event):
+        if isinstance(event, events.ChunkDone):
+            seen.append(disk_states(pass_setup))
+
+    run_pass(pass_setup, listener)
+    # Chunk 1 failed, so no event for it: events follow chunks 0, 2, 3 and 4.
+    assert seen == ["CPPPP", "CFCPP", "CFCCP", "CFCCC"]
+
+
+def test_events_report_the_pass_and_each_correct_chunk(pass_setup):
+    received = []
+    run_pass(pass_setup, received.append)
+    assert received[0] == events.PassStarted(pending=5)
+    assert received[1:] == [
+        events.ChunkDone(index=i, total=5, bytes=50) for i in range(5)
+    ]
+
+
+def test_network_down_ends_the_pass_after_three_failures(pass_setup):
+    server = pass_setup[4]
+    server.cut_connection_after("/image.iso", 10)
+    assert run_pass(pass_setup) is True
+    assert len(server.requests) == 3
+    assert disk_states(pass_setup) == "FFFPP"
+
+
+def test_a_correct_chunk_resets_the_failure_count(pass_setup):
+    server = pass_setup[4]
+    # Chunks 0, 1 fail; chunk 2 works; chunks 3, 4 fail: never 3 in a row.
+    server.cut_connection_after("/image.iso", 10, times=2)
+    assert run_pass(pass_setup) is False
+    assert disk_states(pass_setup) == "FFCCC"
+
+
+def test_failed_chunks_are_tried_again_by_the_next_pass(pass_setup):
+    server = pass_setup[4]
+    server.cut_connection_after("/image.iso", 10, times=1)
+    run_pass(pass_setup)
+    assert disk_states(pass_setup) == "FCCCC"
+    assert run_pass(pass_setup) is False
+    assert disk_states(pass_setup) == "CCCCC"
+    assert pass_setup[1].read_bytes() == CONTENT
+
+
+def test_fatal_error_stops_the_pass_and_keeps_the_state(pass_setup):
+    server = pass_setup[4]
+    server.respond_with_statuses("/image.iso", [404])
+    with pytest.raises(NetworkError):
+        run_pass(pass_setup)
+    assert disk_states(pass_setup) == "PPPPP"
+
+
+def test_interruption_from_the_listener_keeps_finished_chunks(pass_setup):
+    from chunkget.errors import InterruptedByUser
+
+    def listener(event):
+        if isinstance(event, events.ChunkDone) and event.index == 1:
+            raise InterruptedByUser("stop")
+
+    with pytest.raises(InterruptedByUser):
+        run_pass(pass_setup, listener)
+    assert disk_states(pass_setup) == "CCPPP"

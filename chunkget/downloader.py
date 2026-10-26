@@ -167,3 +167,43 @@ def download_chunk(loaded, chunk, destination, timeout):
     if found != chunk.hash:
         return ChunkResult.BAD_HASH
     return ChunkResult.CORRECT
+
+
+def run_pass(loaded, destination, current, state_dir, timeout, listener=None):
+    """Make one pass over the chunks that are not correct yet (D7).
+
+    ``current`` is the ``State`` to update; it is saved after every chunk
+    (RF9). A chunk with a wrong hash or a network failure becomes ``F`` and
+    the pass goes on. After ``config.MAX_CONSECUTIVE_NETWORK_FAILURES``
+    network failures in a row the pass ends early, leaving the chunks not
+    tried as they were. Returns True if it ended early.
+    """
+    pending = [
+        index
+        for index, char in enumerate(current.chunk_states)
+        if char != state.CORRECT
+    ]
+    if listener is not None:
+        listener(events.PassStarted(pending=len(pending)))
+    consecutive_failures = 0
+    for index in pending:
+        chunk = loaded.chunks[index]
+        result = download_chunk(loaded, chunk, destination, timeout)
+        if result is ChunkResult.CORRECT:
+            consecutive_failures = 0
+            state.set_chunk_state(current, index, state.CORRECT, state_dir)
+            if listener is not None:
+                listener(
+                    events.ChunkDone(
+                        index=index,
+                        total=len(loaded.chunks),
+                        bytes=chunk.end - chunk.start,
+                    )
+                )
+            continue
+        state.set_chunk_state(current, index, state.FAILED, state_dir)
+        if result is ChunkResult.NETWORK_FAILURE:
+            consecutive_failures += 1
+            if consecutive_failures >= config.MAX_CONSECUTIVE_NETWORK_FAILURES:
+                return True
+    return False

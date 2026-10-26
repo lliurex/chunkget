@@ -336,7 +336,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Pide el rango, lo escribe en su posición y compara el hash con el del manifest. Devuelve: correcto, hash incorrecto o fallo reintentable de red.
   - Hecho cuando: tests contra el servidor comprueban los tres resultados (datos correctos, bytes corruptos en el fragmento, conexión cortada a mitad) y que un hash incorrecto no lanza excepción.
 
-- [ ] **T49 — Una pasada sobre los fragmentos**
+- [x] **T49 — Una pasada sobre los fragmentos**
   - RF/RNF: RF9, D7
   - Depende de: T48, T42
   - Recorre los fragmentos que no están en `C`, actualiza el estado tras cada uno (`C` o `F`), continúa tras un hash incorrecto y emite eventos. Corta la pasada tras 3 fallos de red consecutivos.
