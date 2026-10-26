@@ -324,7 +324,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Dado si existen destino y estado, su tamaño, `restart` y `overwrite`, devuelve el escenario: `new`, `new_discarding_state`, `needs_confirmation`, `resume`, `inconsistent`.
   - Hecho cuando: un test parametrizado cubre las cinco filas de la tabla de D14 y el efecto de `restart`.
 
-- [ ] **T47 — Aplicar el escenario**
+- [x] **T47 — Aplicar el escenario**
   - RF/RNF: RF7, RF8, D14
   - Depende de: T46, T33, T40, T41
   - Prepara destino y estado según el escenario: crea ambos en `new`; descarta el estado en `new_discarding_state`; lanza `DestinationExistsError` en `needs_confirmation` si no hay `overwrite`; lanza `StateInvalidError` en `inconsistent`; carga el estado en `resume`.

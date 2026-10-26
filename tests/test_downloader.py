@@ -353,3 +353,158 @@ def test_empty_manifest_and_empty_destination_resume():
 def test_decision_depends_only_on_its_arguments():
     arguments = (MATCHING, True, SIZE)
     assert decide_scenario(*arguments) is decide_scenario(*arguments)
+
+
+# --- Applying the scenario (T47) ---
+
+from chunkget import state as state_module
+from chunkget.errors import DestinationExistsError, StateInvalidError
+
+
+@pytest.fixture
+def setup(manifest_file, tmp_path):
+    """(manifest, destination, state_dir) with nothing created yet."""
+    manifest, _path = manifest_file
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    return manifest, tmp_path / "out" / "image.iso", state_dir
+
+
+def prepare(setup, **kwargs):
+    manifest, destination, state_dir = setup
+    destination.parent.mkdir(exist_ok=True)
+    return downloader.prepare_download(manifest, destination, state_dir, **kwargs)
+
+
+def saved_state(setup):
+    manifest, destination, state_dir = setup
+    return state_module.load_state(state_dir, manifest, destination)
+
+
+def test_new_creates_destination_and_state(setup):
+    manifest, destination, _dir = setup
+    result = prepare(setup)
+    assert destination.stat().st_size == manifest.size
+    assert destination.read_bytes() == bytes(manifest.size)
+    assert result.chunk_states == "PPP"
+    assert result.status == state_module.IN_PROGRESS
+    assert saved_state(setup) == result
+
+
+def test_new_discarding_state_replaces_the_old_state(setup):
+    manifest, destination, state_dir = setup
+    old = state_module.new_state(manifest, destination)
+    old.chunk_states = "CCF"
+    state_module.save_state(old, state_dir)
+    result = prepare(setup)
+    assert destination.stat().st_size == manifest.size
+    assert result.chunk_states == "PPP"
+    assert saved_state(setup).chunk_states == "PPP"
+
+
+def test_discarded_state_may_be_corrupt(setup):
+    manifest, destination, state_dir = setup
+    key = state_module.state_key(manifest.global_hash, destination)
+    state_module.state_path(state_dir, key).write_text("not json")
+    assert prepare(setup).chunk_states == "PPP"
+    assert saved_state(setup).chunk_states == "PPP"
+
+
+def test_needs_confirmation_raises_and_changes_nothing(setup):
+    manifest, destination, state_dir = setup
+    destination.parent.mkdir()
+    destination.write_bytes(b"precious")
+    with pytest.raises(DestinationExistsError) as excinfo:
+        prepare(setup)
+    assert excinfo.value.exit_code == ExitCode.USER_DECLINED
+    assert destination.read_bytes() == b"precious"
+    assert list(state_dir.iterdir()) == []
+
+
+def test_overwrite_accepts_an_existing_destination(setup):
+    manifest, destination, _dir = setup
+    destination.parent.mkdir()
+    destination.write_bytes(b"old content")
+    result = prepare(setup, overwrite=True)
+    assert destination.stat().st_size == manifest.size
+    assert result.chunk_states == "PPP"
+    assert saved_state(setup) == result
+
+
+def test_inconsistent_raises_and_changes_nothing(setup):
+    manifest, destination, state_dir = setup
+    destination.parent.mkdir()
+    destination.write_bytes(b"short")
+    existing = state_module.new_state(manifest, destination)
+    state_module.save_state(existing, state_dir)
+    with pytest.raises(StateInvalidError) as excinfo:
+        prepare(setup)
+    assert excinfo.value.exit_code == ExitCode.STATE_INVALID
+    assert destination.read_bytes() == b"short"
+    assert saved_state(setup) == existing
+
+
+def test_resume_loads_the_state_and_keeps_the_destination(setup):
+    manifest, destination, state_dir = setup
+    prepare(setup)
+    destination.write_bytes(b"x" * manifest.size)
+    done = saved_state(setup)
+    state_module.set_chunk_state(done, 0, state_module.CORRECT, state_dir)
+    result = prepare(setup)
+    assert result.chunk_states == "CPP"
+    assert destination.read_bytes() == b"x" * manifest.size
+
+
+def test_resume_with_a_corrupt_state_is_a_state_error(setup):
+    manifest, destination, state_dir = setup
+    prepare(setup)
+    key = state_module.state_key(manifest.global_hash, destination)
+    state_module.state_path(state_dir, key).write_text("not json")
+    with pytest.raises(StateInvalidError):
+        prepare(setup)
+
+
+def test_restart_discards_the_state_of_an_existing_destination(setup):
+    manifest, destination, state_dir = setup
+    prepare(setup)
+    done = saved_state(setup)
+    state_module.set_chunk_state(done, 0, state_module.CORRECT, state_dir)
+    with pytest.raises(DestinationExistsError):
+        prepare(setup, restart=True)
+    assert saved_state(setup).chunk_states == "CPP"
+    assert prepare(setup, restart=True, overwrite=True).chunk_states == "PPP"
+    assert saved_state(setup).chunk_states == "PPP"
+
+
+def test_restart_resizes_a_destination_of_the_wrong_size(setup):
+    manifest, destination, _dir = setup
+    prepare(setup)
+    destination.write_bytes(b"short")
+    prepare(setup, restart=True, overwrite=True)
+    assert destination.stat().st_size == manifest.size
+
+
+def test_empty_manifest_creates_an_empty_destination(tmp_path):
+    source = tmp_path / "empty"
+    source.write_bytes(b"")
+    manifest = manifest_builder.build_manifest(source, DATA_URL, chunk_size=100)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    destination = tmp_path / "empty.out"
+    result = downloader.prepare_download(manifest, destination, state_dir)
+    assert destination.read_bytes() == b""
+    assert result.chunk_states == ""
+
+
+def test_no_space_creates_no_state(setup, monkeypatch):
+    from chunkget.errors import NoSpaceError
+
+    def no_space(*args):
+        raise NoSpaceError("full")
+
+    monkeypatch.setattr("chunkget.storage.check_destination_space", no_space)
+    manifest, destination, state_dir = setup
+    with pytest.raises(NoSpaceError):
+        prepare(setup)
+    assert not destination.exists()
+    assert list(state_dir.iterdir()) == []

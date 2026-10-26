@@ -1,9 +1,12 @@
 """Orchestration of the ``download`` command."""
 
 import enum
+import os
 import re
 
-from chunkget import config, events, http, manifest
+from chunkget import config, events, http, manifest, state, storage
+from chunkget.errors import DestinationExistsError, StateInvalidError, filesystem_errors
+from chunkget.i18n import _
 
 # "scheme://": anything that looks like a URL is not a local path.
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
@@ -81,3 +84,55 @@ def decide_scenario(
     if not overwrite:
         return Scenario.NEEDS_CONFIRMATION
     return Scenario.NEW_DISCARDING_STATE if state_exists else Scenario.NEW
+
+
+def _destination_size(destination):
+    """Size of the destination, or None if it does not exist."""
+    with filesystem_errors(destination):
+        try:
+            return os.path.getsize(destination)
+        except FileNotFoundError:
+            return None
+
+
+def prepare_download(
+    loaded, destination, state_dir, restart=False, overwrite=False
+):
+    """Prepare the destination and the state of a download (D14).
+
+    Returns the ``State`` to work with. The caller holds the download lock
+    and has already created ``state_dir``. Depending on the scenario:
+
+    - new: the destination is created and a state with every chunk pending.
+    - new_discarding_state: the same, replacing the stale state.
+    - needs_confirmation: ``DestinationExistsError``, nothing is changed.
+    - inconsistent: ``StateInvalidError``, nothing is changed.
+    - resume: the saved state is loaded; the destination is left as it is.
+    """
+    key = state.state_key(loaded.global_hash, destination)
+    state_exists = state.state_path(state_dir, key).exists()
+    scenario = decide_scenario(
+        _destination_size(destination),
+        state_exists,
+        loaded.size,
+        restart=restart,
+        overwrite=overwrite,
+    )
+    if scenario is Scenario.NEEDS_CONFIRMATION:
+        raise DestinationExistsError(
+            _("the destination {path} already exists").format(path=destination)
+        )
+    if scenario is Scenario.INCONSISTENT:
+        raise StateInvalidError(
+            _(
+                "the destination {path} does not match its saved state: "
+                "use --restart to download it again"
+            ).format(path=destination)
+        )
+    if scenario is Scenario.RESUME:
+        return state.load_state(state_dir, loaded, destination)
+    # The destination is prepared first: with no space left no state is saved.
+    storage.prepare_destination(destination, loaded.size)
+    fresh = state.new_state(loaded, destination)
+    state.save_state(fresh, state_dir)
+    return fresh
