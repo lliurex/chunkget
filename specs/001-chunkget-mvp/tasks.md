@@ -364,7 +364,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: un test repite una descarga terminada y comprueba que el servidor no recibe peticiones de fragmentos, que se verifica el hash global y que termina sin error.
 
-- [ ] **T54 — Servidor incompatible: abortar antes de escribir datos**
+- [x] **T54 — Servidor incompatible: abortar antes de escribir datos**
   - RF/RNF: RF7, RF9, código 11
   - Depende de: T52
   - Hecho cuando: tests con servidor que ignora `Range` (200) y con servidor que devuelve otro total comprueban `ServerIncompatibleError` (11) y que el destino conserva exclusivamente ceros (ningún dato escrito) y el estado sigue en `P`.

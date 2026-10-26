@@ -1126,3 +1126,48 @@ def test_download_with_a_failed_global_check_is_verified_again(full_setup):
     download(full_setup)
     [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
     assert state_module.from_json(state_file.read_bytes()).status == "completed"
+
+
+# --- Incompatible server: abort before writing data (T54) ---
+
+
+def assert_nothing_was_written(full_setup, server):
+    manifest_path, destination, state_dir, _server = full_setup
+    assert destination.read_bytes() == bytes(len(CONTENT))
+    [state_file] = [p for p in state_dir.iterdir() if p.suffix == ".json"]
+    assert state_module.from_json(state_file.read_bytes()).chunk_states == "PPPPP"
+    assert len(chunk_requests(server)) == 1
+
+
+def test_server_that_ignores_range_aborts_with_code_11(full_setup):
+    server = full_setup[3]
+    server.ignore_range("/image.iso")
+    with pytest.raises(ServerIncompatibleError) as excinfo:
+        download(full_setup, max_retries=5)
+    assert excinfo.value.exit_code == ExitCode.SERVER_INCOMPATIBLE
+    assert_nothing_was_written(full_setup, server)
+
+
+def test_server_with_a_different_total_aborts_with_code_11(full_setup):
+    server = full_setup[3]
+    server.report_total("/image.iso", len(CONTENT) + 1)
+    with pytest.raises(ServerIncompatibleError) as excinfo:
+        download(full_setup, max_retries=5)
+    assert excinfo.value.exit_code == ExitCode.SERVER_INCOMPATIBLE
+    assert_nothing_was_written(full_setup, server)
+
+
+def test_server_with_content_encoding_aborts_with_code_11(full_setup):
+    server = full_setup[3]
+    server.set_content_encoding("/image.iso", "gzip")
+    with pytest.raises(ServerIncompatibleError):
+        download(full_setup, max_retries=5)
+    assert_nothing_was_written(full_setup, server)
+
+
+def test_incompatible_server_is_not_retried_or_waited_for(full_setup):
+    full_setup[3].ignore_range("/image.iso")
+    sleeps = []
+    with pytest.raises(ServerIncompatibleError):
+        download(full_setup, max_retries=5, sleep=sleeps.append)
+    assert sleeps == []
