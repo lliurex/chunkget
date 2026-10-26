@@ -369,7 +369,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: tests con servidor que ignora `Range` (200) y con servidor que devuelve otro total comprueban `ServerIncompatibleError` (11) y que el destino conserva exclusivamente ceros (ningún dato escrito) y el estado sigue en `P`.
 
-- [ ] **T55 — Interrupción del usuario**
+- [x] **T55 — Interrupción del usuario**
   - RF/RNF: caso «Ctrl-C», D8, D9
   - Depende de: T52
   - Hecho cuando: un test lanza `InterruptedByUser` desde el *listener* tras el fragmento 2; el estado en disco muestra los fragmentos 0–2 en `C` y los demás en `P`; una nueva ejecución completa la descarga y solo pide los fragmentos 3 en adelante.

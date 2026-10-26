@@ -1171,3 +1171,80 @@ def test_incompatible_server_is_not_retried_or_waited_for(full_setup):
     with pytest.raises(ServerIncompatibleError):
         download(full_setup, max_retries=5, sleep=sleeps.append)
     assert sleeps == []
+
+
+# --- Interruption by the user (T55) ---
+
+
+def interrupt_after(index):
+    def listener(event):
+        if isinstance(event, events.ChunkDone) and event.index == index:
+            raise InterruptedByUser("stop")
+
+    return listener
+
+
+def saved_chunk_states(full_setup):
+    [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
+    return state_module.from_json(state_file.read_bytes()).chunk_states
+
+
+def test_interruption_leaves_the_finished_chunks_correct(full_setup):
+    with pytest.raises(InterruptedByUser) as excinfo:
+        download(full_setup, listener=interrupt_after(2))
+    assert excinfo.value.exit_code == ExitCode.INTERRUPTED
+    assert saved_chunk_states(full_setup) == "CCCPP"
+
+
+def test_rerun_after_the_interruption_asks_only_for_chunk_3_onwards(full_setup):
+    server = full_setup[3]
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(2))
+    server.requests.clear()
+    download(full_setup)
+    assert chunk_requests(server) == ["bytes=150-199", "bytes=200-249"]
+    assert full_setup[1].read_bytes() == CONTENT
+    assert saved_chunk_states(full_setup) == "CCCCC"
+
+
+def test_interruption_in_the_middle_of_a_chunk_keeps_its_state(full_setup, monkeypatch):
+    real_write_chunk = downloader.storage.write_chunk
+    calls = []
+
+    def interrupted(path, start, stream, length, algorithm):
+        calls.append(start)
+        if len(calls) == 3:
+            stream.read(10)  # some data of the third chunk arrives
+            raise InterruptedByUser("stop")
+        return real_write_chunk(path, start, stream, length, algorithm)
+
+    monkeypatch.setattr(downloader.storage, "write_chunk", interrupted)
+    with pytest.raises(InterruptedByUser):
+        download(full_setup)
+    assert saved_chunk_states(full_setup) == "CCPPP"
+    monkeypatch.undo()
+    full_setup[3].requests.clear()
+    download(full_setup)
+    assert chunk_requests(full_setup[3]) == [
+        "bytes=100-149",
+        "bytes=150-199",
+        "bytes=200-249",
+    ]
+    assert full_setup[1].read_bytes() == CONTENT
+
+
+def test_interruption_releases_the_lock_and_leaves_no_temporary_file(full_setup):
+    with pytest.raises(InterruptedByUser):
+        download(full_setup, listener=interrupt_after(1))
+    names = sorted(p.suffix for p in full_setup[2].iterdir())
+    assert names == [".json", ".lock"]
+    download(full_setup)  # the lock can be taken again
+
+
+def test_interruption_is_not_retried(full_setup):
+    sleeps = []
+    with pytest.raises(InterruptedByUser):
+        download(
+            full_setup, max_retries=5, sleep=sleeps.append, listener=interrupt_after(0)
+        )
+    assert sleeps == []
