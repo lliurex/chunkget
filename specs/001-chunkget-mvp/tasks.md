@@ -359,7 +359,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T51, T47
   - Hecho cuando: un test descarga con un servidor que corta tras 2 de 5 fragmentos, vuelve a lanzar la descarga y comprueba, con el registro del servidor, que solo se piden los 3 fragmentos pendientes, y que el fichero final es idéntico al original.
 
-- [ ] **T53 — Descarga ya completada**
+- [x] **T53 — Descarga ya completada**
   - RF/RNF: RF11, D14
   - Depende de: T52
   - Hecho cuando: un test repite una descarga terminada y comprueba que el servidor no recibe peticiones de fragmentos, que se verifica el hash global y que termina sin error.

@@ -1078,3 +1078,51 @@ def test_download_creates_the_state_dir(full_setup, tmp_path):
     new_dir = tmp_path / "does" / "not" / "exist"
     downloader.download(manifest_path, destination, new_dir, timeout=5, max_retries=0)
     assert new_dir.is_dir()
+
+
+# --- A download that is already complete (T53) ---
+
+
+def test_repeating_a_finished_download_requests_no_chunks(full_setup):
+    server = full_setup[3]
+    download(full_setup)
+    server.requests.clear()
+    received = []
+    result = download(full_setup, listener=received.append)
+    assert result == full_setup[1]
+    assert chunk_requests(server) == []
+    assert full_setup[1].read_bytes() == CONTENT
+    assert events.GlobalCheckStarted(algorithm="sha256") in received
+    assert not any(isinstance(e, events.ChunkDone) for e in received)
+
+
+def test_repeating_a_finished_download_keeps_it_completed(full_setup):
+    download(full_setup)
+    download(full_setup)
+    [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
+    assert state_module.from_json(state_file.read_bytes()).status == "completed"
+
+
+def test_finished_download_is_verified_again_not_trusted(full_setup):
+    download(full_setup)
+    with open(full_setup[1], "r+b") as handle:
+        handle.write(b"\xff")
+    with pytest.raises(GlobalHashMismatchError):
+        download(full_setup)
+    [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
+    assert (
+        state_module.from_json(state_file.read_bytes()).status == "global_check_failed"
+    )
+
+
+def test_download_with_a_failed_global_check_is_verified_again(full_setup):
+    download(full_setup)
+    with open(full_setup[1], "r+b") as handle:
+        handle.write(b"\xff")
+    with pytest.raises(GlobalHashMismatchError):
+        download(full_setup)
+    with open(full_setup[1], "r+b") as handle:
+        handle.write(CONTENT[:1])
+    download(full_setup)
+    [state_file] = [p for p in full_setup[2].iterdir() if p.suffix == ".json"]
+    assert state_module.from_json(state_file.read_bytes()).status == "completed"
