@@ -398,7 +398,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
 
 ## Fase 9 — Generación del manifest (orquestación)
 
-- [ ] **T60 — `make-manifest` desde fichero local: escritura**
+- [x] **T60 — `make-manifest` desde fichero local: escritura**
   - RF/RNF: RF2
   - Depende de: T21, T18, T10
   - `publisher.py`: construye el manifest y lo escribe en la ruta de salida (por defecto `./<name>.chunkget.manifest`) al final del proceso.
