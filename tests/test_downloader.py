@@ -508,3 +508,93 @@ def test_no_space_creates_no_state(setup, monkeypatch):
         prepare(setup)
     assert not destination.exists()
     assert list(state_dir.iterdir()) == []
+
+
+# --- Downloading one chunk (T48) ---
+
+import dataclasses
+
+from chunkget.errors import NetworkError, ServerIncompatibleError
+from chunkget.downloader import ChunkResult
+
+CONTENT = bytes(index % 251 for index in range(250))
+
+
+@pytest.fixture
+def chunk_setup(tmp_path, http_server):
+    """(manifest, destination, server) for a 250-byte file in chunks of 100."""
+    source = tmp_path / "image.iso"
+    source.write_bytes(CONTENT)
+    url = http_server.serve("/image.iso", CONTENT)
+    manifest = manifest_builder.build_manifest(source, url, chunk_size=100)
+    destination = tmp_path / "out.iso"
+    destination.write_bytes(bytes(len(CONTENT)))
+    return manifest, destination, http_server
+
+
+def fetch_chunk(chunk_setup, index):
+    manifest, destination, _server = chunk_setup
+    return downloader.download_chunk(manifest, manifest.chunks[index], destination, 5)
+
+
+def test_correct_data_is_written_in_place(chunk_setup):
+    manifest, destination, _server = chunk_setup
+    assert fetch_chunk(chunk_setup, 1) is ChunkResult.CORRECT
+    data = destination.read_bytes()
+    assert data[100:200] == CONTENT[100:200]
+    assert data[:100] == bytes(100) and data[200:] == bytes(50)
+
+
+def test_last_shorter_chunk_is_correct(chunk_setup):
+    manifest, destination, _server = chunk_setup
+    assert fetch_chunk(chunk_setup, 2) is ChunkResult.CORRECT
+    assert destination.read_bytes()[200:] == CONTENT[200:]
+
+
+def test_requests_exactly_the_range_of_the_chunk(chunk_setup):
+    fetch_chunk(chunk_setup, 1)
+    assert [r.range for r in chunk_setup[2].requests] == ["bytes=100-199"]
+
+
+def test_corrupt_bytes_are_a_bad_hash_not_an_exception(chunk_setup):
+    manifest, _destination, server = chunk_setup
+    server.corrupt_range("/image.iso", 100, 110)
+    assert fetch_chunk(chunk_setup, 1) is ChunkResult.BAD_HASH
+    assert fetch_chunk(chunk_setup, 0) is ChunkResult.CORRECT
+
+
+def test_cut_connection_is_a_network_failure(chunk_setup):
+    chunk_setup[2].cut_connection_after("/image.iso", 40)
+    assert fetch_chunk(chunk_setup, 1) is ChunkResult.NETWORK_FAILURE
+
+
+def test_retryable_status_is_a_network_failure(chunk_setup):
+    chunk_setup[2].respond_with_statuses("/image.iso", [503])
+    assert fetch_chunk(chunk_setup, 0) is ChunkResult.NETWORK_FAILURE
+
+
+def test_fatal_http_error_is_raised(chunk_setup):
+    chunk_setup[2].respond_with_statuses("/image.iso", [404])
+    with pytest.raises(NetworkError):
+        fetch_chunk(chunk_setup, 0)
+
+
+def test_incompatible_server_is_raised_and_nothing_is_written(chunk_setup):
+    manifest, destination, server = chunk_setup
+    server.ignore_range("/image.iso")
+    with pytest.raises(ServerIncompatibleError):
+        fetch_chunk(chunk_setup, 1)
+    assert destination.read_bytes() == bytes(len(CONTENT))
+
+
+def test_hash_algorithm_comes_from_the_manifest(tmp_path, http_server):
+    source = tmp_path / "image.iso"
+    source.write_bytes(CONTENT)
+    url = http_server.serve("/image.iso", CONTENT)
+    manifest = manifest_builder.build_manifest(
+        source, url, chunk_size=100, algorithm="sha3_256"
+    )
+    destination = tmp_path / "out.iso"
+    destination.write_bytes(bytes(len(CONTENT)))
+    result = downloader.download_chunk(manifest, manifest.chunks[0], destination, 5)
+    assert result is ChunkResult.CORRECT

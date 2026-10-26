@@ -4,7 +4,7 @@ import enum
 import os
 import re
 
-from chunkget import config, events, http, manifest, state, storage
+from chunkget import config, events, hashing, http, manifest, state, storage
 from chunkget.errors import DestinationExistsError, StateInvalidError, filesystem_errors
 from chunkget.i18n import _
 
@@ -136,3 +136,34 @@ def prepare_download(
     fresh = state.new_state(loaded, destination)
     state.save_state(fresh, state_dir)
     return fresh
+
+
+class ChunkResult(enum.Enum):
+    """Outcome of downloading one chunk."""
+
+    CORRECT = "correct"
+    BAD_HASH = "bad_hash"
+    NETWORK_FAILURE = "network_failure"
+
+
+def download_chunk(loaded, chunk, destination, timeout):
+    """Download one chunk into its place in ``destination`` and verify it.
+
+    A wrong hash or a transient network failure are results, not
+    exceptions, so the caller can go on with the next chunk (RF9, D7).
+    Fatal errors (``NetworkError``, ``ServerIncompatibleError``) are raised;
+    an incompatible server is detected before any data is written.
+    """
+    algorithm, _digest = hashing.parse_hash(chunk.hash)
+    try:
+        with http.open_range(
+            loaded.url, chunk.start, chunk.end, timeout, total=loaded.size
+        ) as stream:
+            found = storage.write_chunk(
+                destination, chunk.start, stream, chunk.end - chunk.start, algorithm
+            )
+    except http.RetryableError:
+        return ChunkResult.NETWORK_FAILURE
+    if found != chunk.hash:
+        return ChunkResult.BAD_HASH
+    return ChunkResult.CORRECT

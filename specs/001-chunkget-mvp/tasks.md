@@ -330,7 +330,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Prepara destino y estado según el escenario: crea ambos en `new`; descarta el estado en `new_discarding_state`; lanza `DestinationExistsError` en `needs_confirmation` si no hay `overwrite`; lanza `StateInvalidError` en `inconsistent`; carga el estado en `resume`.
   - Hecho cuando: tests comprueban, para cada escenario, el contenido de disco resultante (tamaño del destino, estado en `P`, o estado cargado) y las excepciones correspondientes.
 
-- [ ] **T48 — Descargar un fragmento**
+- [x] **T48 — Descargar un fragmento**
   - RF/RNF: RF7, RF9
   - Depende de: T29, T34, T05
   - Pide el rango, lo escribe en su posición y compara el hash con el del manifest. Devuelve: correcto, hash incorrecto o fallo reintentable de red.
