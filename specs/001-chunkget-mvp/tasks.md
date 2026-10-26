@@ -483,7 +483,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Atiende `DestinationExistsError` y `OutputExistsError` (manifest descargado distinto del existente) preguntando si se sobrescribe; `-y`; sin terminal → código 4. Soporta `-o`, `--state-dir`, `--manifest-file` y `--restart`. `--manifest-file` con un `MANIFEST` que es ruta local → código 2.
   - Hecho cuando: tests comprueban: destino existente sin estado con respuesta sí/no/`-y`/sin terminal; manifest local distinto en la ruta por defecto con respuesta sí/no/`-y`/sin terminal; `-o` cambia el destino; `--state-dir` coloca ahí el estado; `--manifest-file` guarda el manifest en esa ruta; `--manifest-file` con ruta local termina con 2; `--restart` repite la descarga.
 
-- [ ] **T74 — `download`: errores finales**
+- [x] **T74 — `download`: errores finales**
   - RF/RNF: RF10, RF11, RNF3
   - Depende de: T72
   - Muestra los mensajes de 7.4 para reintentos agotados (código 7) y fallo del hash global (código 8), y el resto de códigos de 7.5 propios de `download` (3, 5, 6, 9, 10, 11, 12, 13).

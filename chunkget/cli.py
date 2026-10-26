@@ -10,7 +10,9 @@ from chunkget.errors import (
     ChunkgetError,
     DestinationExistsError,
     ExitCode,
+    GlobalHashMismatchError,
     OutputExistsError,
+    RetriesExhaustedError,
     SourceError,
     UsageError,
     UserDeclinedError,
@@ -432,6 +434,13 @@ class _DownloadReporter:
             sys.stderr.write(line + "\n")
         sys.stderr.flush()
 
+    def finish(self):
+        """End a progress line that is still being rewritten."""
+        if self._open_line:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            self._open_line = 0
+
     def _message(self, text):
         """A line of its own: it ends a progress line that is being rewritten."""
         if self._open_line:
@@ -447,6 +456,37 @@ def _download(args):
             _("--manifest-file can only be used when MANIFEST is a URL")
         )
     reporter = _DownloadReporter()
+    try:
+        return _run_download(args, reporter)
+    except RetriesExhaustedError as error:
+        if error.remaining is None:
+            raise
+        raise RetriesExhaustedError(
+            _(
+                "Download incomplete: {chunks} still failed after {passes}. "
+                "Run the command again to resume."
+            ).format(
+                chunks=ngettext("{n} chunk", "{n} chunks", error.remaining).format(
+                    n=error.remaining
+                ),
+                passes=ngettext(
+                    "{n} retry pass", "{n} retry passes", error.retries
+                ).format(n=error.retries),
+            )
+        ) from None
+    except GlobalHashMismatchError:
+        raise GlobalHashMismatchError(
+            _(
+                "Global validation failed: the file does not match the manifest "
+                "hash. Use --restart to download it again."
+            )
+        ) from None
+    finally:
+        # An error message must not end up on the progress line.
+        reporter.finish()
+
+
+def _run_download(args, reporter):
     # The questions are asked when the core reports the conflict; it is then
     # called again with the answer already given.
     overwrite_manifest = args.yes

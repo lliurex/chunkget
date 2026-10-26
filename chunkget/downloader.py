@@ -270,7 +270,9 @@ def run_passes(
             _(
                 "download incomplete: {count} chunks still not downloaded after "
                 "{retries} retry passes"
-            ).format(count=remaining, retries=max_retries)
+            ).format(count=remaining, retries=max_retries),
+            remaining=remaining,
+            retries=max_retries,
         )
 
 

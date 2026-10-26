@@ -421,3 +421,247 @@ def test_help_lists_the_options(capsys):
     code, out, err = run(capsys, "download", "--help")
     for option in ("-o", "--output", "--state-dir", "--manifest-file", "--restart", "-y", "--yes"):
         assert option in out
+
+
+# --- Final errors and their messages (T74) ---
+
+import collections
+import dataclasses
+
+from chunkget import state as state_module
+
+PREFIX = "chunkget: error: "
+
+
+@pytest.fixture
+def fast(monkeypatch):
+    """Retry passes do not wait."""
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+
+
+def last_line(err):
+    return err.splitlines()[-1]
+
+
+def error_lines(err):
+    return [line for line in err.splitlines() if line.startswith(PREFIX)]
+
+
+def test_retries_exhausted_is_code_7_with_the_message_of_the_plan(env, served, capsys, fast):
+    served[0].corrupt_range("/image.iso", 50, 60)
+    served[0].corrupt_range("/image.iso", 100, 110)  # only the last one is kept
+    code, out, err = run(capsys, "download", str(served[1]), "--max-retries", "5")
+    assert code == 7
+    assert out == ""
+    assert error_lines(err) == [
+        PREFIX + "Download incomplete: 1 chunk still failed after 5 retry passes. "
+        "Run the command again to resume."
+    ]
+
+
+def test_retries_exhausted_with_several_chunks_and_other_retries(env, served, capsys, fast):
+    served[0].corrupt_range("/image.iso", 0, 250)
+    code, out, err = run(capsys, "download", str(served[1]), "--max-retries", "2")
+    assert code == 7
+    assert error_lines(err) == [
+        PREFIX + "Download incomplete: 5 chunks still failed after 2 retry passes. "
+        "Run the command again to resume."
+    ]
+
+
+def test_retries_exhausted_with_one_pass(env, served, capsys, fast):
+    served[0].corrupt_range("/image.iso", 0, 250)
+    code, out, err = run(capsys, "download", str(served[1]), "--max-retries", "1")
+    assert "after 1 retry pass." in last_line(err)
+
+
+def test_retries_exhausted_keeps_the_correct_chunks_and_can_be_resumed(
+    env, served, capsys, fast
+):
+    served[0].corrupt_range("/image.iso", 50, 60)
+    assert run(capsys, "download", str(served[1]), "--max-retries", "0")[0] == 7
+    served[0].corruptions.clear()
+    served[0].requests.clear()
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 0
+    assert [r.range for r in served[0].requests] == ["bytes=50-99"]
+
+
+def altered_global_hash(tmp_path, served):
+    from chunkget import manifest as manifest_module
+
+    loaded = manifest_module.load_manifest_file(served[1])
+    bad = dataclasses.replace(loaded, global_hash="sha256:" + "0" * 64)
+    path = tmp_path / "bad.manifest"
+    path.write_bytes(bad.to_json().encode("utf-8"))
+    return path
+
+
+def test_global_hash_mismatch_is_code_8_with_the_message_of_the_plan(
+    env, served, tmp_path, capsys
+):
+    path = altered_global_hash(tmp_path, served)
+    code, out, err = run(capsys, "download", str(path))
+    assert code == 8
+    assert out == ""
+    assert error_lines(err) == [
+        PREFIX + "Global validation failed: the file does not match the manifest "
+        "hash. Use --restart to download it again."
+    ]
+    assert (env / "image.iso").read_bytes() == CONTENT  # nothing is deleted
+
+
+def test_missing_manifest_is_code_3(env, capsys):
+    code, out, err = run(capsys, "download", "nope.manifest")
+    assert code == 3
+    assert "nope.manifest" in last_line(err)
+
+
+def test_manifest_url_with_404_is_code_3(env, served, capsys):
+    code, out, err = run(capsys, "download", served[0].url("/missing.manifest"))
+    assert code == 3
+    assert "404" in last_line(err)
+
+
+def test_invalid_manifest_is_code_5_with_a_message(env, capsys):
+    (env / "bad.manifest").write_text("{}")
+    code, out, err = run(capsys, "download", "bad.manifest")
+    assert code == 5
+    assert len(error_lines(err)) == 1
+
+
+def test_fatal_http_error_is_code_6(env, served, capsys, fast):
+    served[0].respond_with_statuses("/image.iso", [404])
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 6
+    assert "404" in last_line(err)
+
+
+def test_no_space_is_code_9(env, served, capsys, monkeypatch):
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr("shutil.disk_usage", lambda path: usage(1000, 1000, 0))
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 9
+    assert "space" in last_line(err)
+    assert not (env / "image.iso").exists()
+
+
+def test_unwritable_destination_is_code_10(env, served, tmp_path, capsys):
+    code, out, err = run(
+        capsys, "download", str(served[1]), "-o", str(tmp_path / "no_dir" / "f.iso")
+    )
+    assert code == 10
+    assert len(error_lines(err)) == 1
+
+
+def test_unwritable_state_dir_is_code_10(env, served, tmp_path, capsys):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file, not a directory")
+    code, out, err = run(
+        capsys, "download", str(served[1]), "--state-dir", str(blocker / "state")
+    )
+    assert code == 10
+    assert not (env / "image.iso").exists()
+
+
+def test_incompatible_server_is_code_11(env, served, capsys, fast):
+    served[0].ignore_range("/image.iso")
+    code, out, err = run(capsys, "download", str(served[1]))
+    assert code == 11
+    assert len(error_lines(err)) == 1
+    assert (env / "image.iso").read_bytes() == bytes(250)
+
+
+def test_download_already_running_is_code_12(env, served, tmp_path, capsys):
+    from chunkget import manifest as manifest_module
+
+    loaded = manifest_module.load_manifest_file(served[1])
+    destination = tmp_path / "out.iso"
+    state_dir = tmp_path / "state_here"
+    state_dir.mkdir()
+    key = state_module.state_key(loaded.global_hash, destination)
+    with state_module.lock_download(state_dir, key):
+        code, out, err = run(
+            capsys, "download", str(served[1]), "-o", str(destination),
+            "--state-dir", str(state_dir),
+        )
+    assert code == 12
+    assert "already running" in last_line(err)
+    assert not destination.exists()
+
+
+def test_inconsistent_state_is_code_13(env, served, tmp_path, capsys):
+    from chunkget import manifest as manifest_module
+
+    loaded = manifest_module.load_manifest_file(served[1])
+    destination = tmp_path / "out.iso"
+    state_dir = tmp_path / "state_here"
+    state_dir.mkdir()
+    destination.write_bytes(b"short")
+    state_module.save_state(state_module.new_state(loaded, destination), state_dir)
+    code, out, err = run(
+        capsys, "download", str(served[1]), "-o", str(destination),
+        "--state-dir", str(state_dir),
+    )
+    assert code == 13
+    assert "--restart" in last_line(err)
+    assert destination.read_bytes() == b"short"
+
+
+def test_corrupt_state_file_is_code_13(env, served, tmp_path, capsys):
+    from chunkget import manifest as manifest_module
+
+    loaded = manifest_module.load_manifest_file(served[1])
+    destination = tmp_path / "out.iso"
+    state_dir = tmp_path / "state_here"
+    state_dir.mkdir()
+    assert run(
+        capsys, "download", str(served[1]), "-o", str(destination),
+        "--state-dir", str(state_dir),
+    )[0] == 0
+    key = state_module.state_key(loaded.global_hash, destination)
+    state_module.state_path(state_dir, key).write_text("not json")
+    code, out, err = run(
+        capsys, "download", str(served[1]), "-o", str(destination),
+        "--state-dir", str(state_dir),
+    )
+    assert code == 13
+
+
+def test_every_error_is_one_line_on_stderr_and_nothing_on_stdout(env, served, capsys, fast):
+    served[0].corrupt_range("/image.iso", 50, 60)
+    code, out, err = run(capsys, "download", str(served[1]), "--max-retries", "0")
+    assert out == ""
+    assert len(error_lines(err)) == 1
+
+
+def test_error_after_a_progress_line_on_a_terminal_starts_a_new_line(
+    env, served, capsys, monkeypatch, fast
+):
+    stream = TtyStream()
+    monkeypatch.setattr("sys.stderr", stream)
+    served[0].corrupt_range("/image.iso", 50, 60)
+    code = cli.main(["download", str(served[1]), "--max-retries", "0"])
+    assert code == 7
+    assert "\n" + PREFIX in stream.getvalue()
+
+
+def test_retry_messages_are_translatable(env, served, capsys, fast):
+    from chunkget import i18n
+
+    class Prefix:
+        def gettext(self, text):
+            return "«T»" + text
+
+        def ngettext(self, one, many, n):
+            return "«T»" + (one if n == 1 else many)
+
+    served[0].corrupt_range("/image.iso", 50, 60)
+    previous = i18n.get_translation()
+    i18n.set_translation(Prefix())
+    try:
+        code, out, err = run(capsys, "download", str(served[1]), "--max-retries", "0")
+    finally:
+        i18n.set_translation(previous)
+    assert code == 7
+    assert last_line(err).startswith(PREFIX + "«T»")

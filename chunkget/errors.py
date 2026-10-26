@@ -75,7 +75,17 @@ class NetworkError(ChunkgetError):
 
 
 class RetriesExhaustedError(ChunkgetError):
+    """Chunks are still not correct after the last retry pass.
+
+    ``remaining`` and ``retries`` let the caller word its own message.
+    """
+
     exit_code = ExitCode.RETRIES_EXHAUSTED
+
+    def __init__(self, message, remaining=None, retries=None):
+        super().__init__(message)
+        self.remaining = remaining
+        self.retries = retries
 
 
 class GlobalHashMismatchError(ChunkgetError):
