@@ -344,3 +344,106 @@ def test_default_output_is_checked_too(source, tmp_path, capsys, stdin, monkeypa
 def test_yes_help_is_listed(capsys):
     code, out, err = run(capsys, "make-manifest", "--help")
     assert "-y" in out and "--yes" in out
+
+
+# --- Source errors (T71) ---
+
+import socket
+
+
+def assert_source_failure(capsys, tmp_path, argv, mention):
+    code, out, err = run(capsys, *argv, "-o", str(tmp_path / "m"))
+    assert code == 3
+    assert out == ""
+    # The last line is the error; a warning may come before it.
+    lines = err.splitlines()
+    assert lines[-1].startswith("chunkget: error: ")
+    assert [line for line in lines if line.startswith("chunkget: error: ")] == lines[-1:]
+    assert mention in lines[-1]
+    assert list(tmp_path.glob("m*")) == []
+
+
+def test_missing_file_is_code_3(tmp_path, capsys, stdin):
+    stdin("", tty=False)
+    assert_source_failure(
+        capsys, tmp_path,
+        ["make-manifest", str(tmp_path / "missing.iso"), "--url", URL],
+        "missing.iso",
+    )
+
+
+def test_directory_is_code_3(tmp_path, capsys, stdin):
+    stdin("", tty=False)
+    assert_source_failure(
+        capsys, tmp_path, ["make-manifest", str(tmp_path), "--url", URL], str(tmp_path)
+    )
+
+
+def test_missing_file_is_reported_even_when_the_url_is_asked_for(
+    tmp_path, capsys, stdin
+):
+    stdin(URL + "\n")
+    assert_source_failure(
+        capsys, tmp_path, ["make-manifest", str(tmp_path / "missing.iso")], "missing.iso"
+    )
+
+
+def test_url_with_404_is_code_3(http_server, tmp_path, capsys, stdin):
+    stdin("", tty=False)
+    url = http_server.url("/missing.iso")
+    assert_source_failure(
+        capsys, tmp_path,
+        ["make-manifest", url, "--download-to", str(tmp_path / "copy.iso")],
+        "404",
+    )
+    assert not (tmp_path / "copy.iso").exists()
+
+
+def test_url_that_does_not_resolve_is_code_3(tmp_path, capsys, stdin, monkeypatch):
+    def no_such_host(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", no_such_host)
+    stdin("", tty=False)
+    assert_source_failure(
+        capsys, tmp_path,
+        ["make-manifest", "http://no-such-host.example/f.iso",
+         "--download-to", str(tmp_path / "copy.iso")],
+        "no-such-host.example",
+    )
+
+
+def test_url_that_refuses_the_connection_is_code_3(tmp_path, capsys, stdin):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    stdin("", tty=False)
+    assert_source_failure(
+        capsys, tmp_path,
+        ["make-manifest", "http://127.0.0.1:%d/f.iso" % port,
+         "--download-to", str(tmp_path / "copy.iso")],
+        "127.0.0.1",
+    )
+
+
+def test_missing_local_file_with_a_url_source_is_code_3(
+    http_server, tmp_path, capsys, stdin
+):
+    stdin("", tty=False)
+    assert_source_failure(
+        capsys, tmp_path,
+        ["make-manifest", http_server.url("/f.iso"),
+         "--local-file", str(tmp_path / "missing.iso")],
+        "missing.iso",
+    )
+
+
+def test_source_error_keeps_an_existing_manifest(tmp_path, capsys, stdin):
+    stdin("", tty=False)
+    (tmp_path / "m").write_bytes(b"previous")
+    code, out, err = run(
+        capsys, "make-manifest", str(tmp_path / "missing.iso"), "--url", URL,
+        "-o", str(tmp_path / "m"), "-y",
+    )
+    assert code == 3
+    assert (tmp_path / "m").read_bytes() == b"previous"

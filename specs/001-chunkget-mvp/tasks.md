@@ -466,7 +466,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Pregunta «descargar o usar fichero local», pide la ruta correspondiente, y admite `--download-to` y `--local-file`. `--url` con un origen URL termina con 2. Avisa de que la descarga no se puede validar.
   - Hecho cuando: tests comprueban los dos caminos interactivos, los dos flags, el error de `--url` con origen URL y la presencia del aviso en stderr.
 
-- [ ] **T71 — `make-manifest`: errores de origen**
+- [x] **T71 — `make-manifest`: errores de origen**
   - RF/RNF: RF4
   - Depende de: T68, T64
   - Hecho cuando: tests comprueban código 3, mensaje en stderr y ausencia de fichero de salida para: fichero inexistente, URL con 404 y URL que no resuelve.
