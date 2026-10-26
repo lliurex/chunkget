@@ -374,7 +374,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: un test lanza `InterruptedByUser` desde el *listener* tras el fragmento 2; el estado en disco muestra los fragmentos 0–2 en `C` y los demás en `P`; una nueva ejecución completa la descarga y solo pide los fragmentos 3 en adelante.
 
-- [ ] **T56 — Corte de red a mitad de fragmento**
+- [x] **T56 — Corte de red a mitad de fragmento**
   - RF/RNF: caso «corte de red», RF10
   - Depende de: T52
   - Hecho cuando: un test con corte a mitad del fragmento 1 comprueba que ese fragmento queda `F`, que los demás se descargan, y que en la pasada de reintento se descarga correctamente y el fichero final es idéntico.

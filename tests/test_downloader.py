@@ -1248,3 +1248,65 @@ def test_interruption_is_not_retried(full_setup):
             full_setup, max_retries=5, sleep=sleeps.append, listener=interrupt_after(0)
         )
     assert sleeps == []
+
+
+# --- Network cut in the middle of a chunk (T56) ---
+
+
+@pytest.fixture
+def cut_in_chunk_1(full_setup):
+    """Arms a single cut in the middle of chunk 1, once chunk 0 is done."""
+    server = full_setup[3]
+
+    def listener(event):
+        if isinstance(event, events.ChunkDone) and event.index == 0:
+            server.cut_connection_after("/image.iso", 20, times=1)
+
+    return listener
+
+
+def test_chunk_cut_in_the_middle_is_failed_and_the_others_go_on(
+    full_setup, cut_in_chunk_1
+):
+    states_at_retry = []
+
+    def listener(event):
+        cut_in_chunk_1(event)
+        if isinstance(event, events.RetryStarted):
+            states_at_retry.append(saved_chunk_states(full_setup))
+
+    download(full_setup, max_retries=1, listener=listener)
+    assert states_at_retry == ["CFCCC"]
+
+
+def test_retry_pass_downloads_the_cut_chunk_and_the_file_is_identical(
+    full_setup, cut_in_chunk_1
+):
+    sleeps = []
+    download(full_setup, max_retries=5, sleep=sleeps.append, listener=cut_in_chunk_1)
+    assert sleeps == [2]
+    assert full_setup[1].read_bytes() == CONTENT
+    assert saved_chunk_states(full_setup) == "CCCCC"
+    assert chunk_requests(full_setup[3]) == [
+        "bytes=0-49",
+        "bytes=50-99",  # cut
+        "bytes=100-149",
+        "bytes=150-199",
+        "bytes=200-249",
+        "bytes=50-99",  # retry pass
+    ]
+
+
+def test_without_retries_the_cut_chunk_is_reported_as_incomplete(
+    full_setup, cut_in_chunk_1
+):
+    with pytest.raises(RetriesExhaustedError) as excinfo:
+        download(full_setup, max_retries=0, listener=cut_in_chunk_1)
+    assert "1 chunks" in str(excinfo.value)
+    assert saved_chunk_states(full_setup) == "CFCCC"
+    assert full_setup[1].read_bytes()[100:] == CONTENT[100:]
+    # Running again fixes only that chunk.
+    full_setup[3].requests.clear()
+    download(full_setup)
+    assert chunk_requests(full_setup[3]) == ["bytes=50-99"]
+    assert full_setup[1].read_bytes() == CONTENT
