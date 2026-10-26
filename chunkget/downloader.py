@@ -3,9 +3,15 @@
 import enum
 import os
 import re
+import time
 
 from chunkget import config, events, hashing, http, manifest, state, storage
-from chunkget.errors import DestinationExistsError, StateInvalidError, filesystem_errors
+from chunkget.errors import (
+    DestinationExistsError,
+    RetriesExhaustedError,
+    StateInvalidError,
+    filesystem_errors,
+)
 from chunkget.i18n import _
 
 # "scheme://": anything that looks like a URL is not a local path.
@@ -207,3 +213,54 @@ def run_pass(loaded, destination, current, state_dir, timeout, listener=None):
             if consecutive_failures >= config.MAX_CONSECUTIVE_NETWORK_FAILURES:
                 return True
     return False
+
+
+def retry_delay(attempt):
+    """Seconds to wait before retry pass ``attempt`` (1-based): 2, 4, 8… up to 60."""
+    return min(config.RETRY_DELAY_BASE * 2 ** (attempt - 1), config.RETRY_DELAY_MAX)
+
+
+def run_passes(
+    loaded,
+    destination,
+    current,
+    state_dir,
+    timeout,
+    max_retries,
+    sleep=None,
+    listener=None,
+):
+    """Run the first pass and then up to ``max_retries`` retry passes (RF10, D7).
+
+    Each retry pass waits first (``sleep``, ``time.sleep`` by default; it is
+    injectable so tests do not wait) and works on the chunks not correct yet.
+    Raises ``RetriesExhaustedError`` if some are still not correct at the end;
+    the state and the correct chunks are kept.
+    """
+    if sleep is None:
+        sleep = time.sleep
+    run_pass(loaded, destination, current, state_dir, timeout, listener)
+    for attempt in range(1, max_retries + 1):
+        pending = _count_not_correct(current)
+        if pending == 0:
+            return
+        sleep(retry_delay(attempt))
+        if listener is not None:
+            listener(
+                events.RetryStarted(
+                    attempt=attempt, max_retries=max_retries, pending=pending
+                )
+            )
+        run_pass(loaded, destination, current, state_dir, timeout, listener)
+    remaining = _count_not_correct(current)
+    if remaining:
+        raise RetriesExhaustedError(
+            _(
+                "download incomplete: {count} chunks still not downloaded after "
+                "{retries} retry passes"
+            ).format(count=remaining, retries=max_retries)
+        )
+
+
+def _count_not_correct(current):
+    return len(current.chunk_states) - current.chunk_states.count(state.CORRECT)

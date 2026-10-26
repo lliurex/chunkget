@@ -723,3 +723,106 @@ def test_interruption_from_the_listener_keeps_finished_chunks(pass_setup):
     with pytest.raises(InterruptedByUser):
         run_pass(pass_setup, listener)
     assert disk_states(pass_setup) == "CCPPP"
+
+
+# --- Retry passes (T50) ---
+
+from chunkget.errors import RetriesExhaustedError
+
+
+def run_passes(pass_setup, max_retries=5, listener=None):
+    manifest, destination, current, state_dir, _server = pass_setup
+    sleeps = []
+    downloader.run_passes(
+        manifest,
+        destination,
+        current,
+        state_dir,
+        5,
+        max_retries,
+        sleep=sleeps.append,
+        listener=listener,
+    )
+    return sleeps
+
+
+def test_no_retry_and_no_wait_when_the_first_pass_succeeds(pass_setup):
+    assert run_passes(pass_setup) == []
+    assert disk_states(pass_setup) == "CCCCC"
+
+
+def test_chunk_that_fails_once_is_fixed_by_a_retry_pass(pass_setup):
+    pass_setup[4].cut_connection_after("/image.iso", 10, times=1)
+    assert run_passes(pass_setup) == [2]
+    assert disk_states(pass_setup) == "CCCCC"
+    assert pass_setup[1].read_bytes() == CONTENT
+
+
+def test_waits_double_up_to_the_limit(pass_setup):
+    pass_setup[4].corrupt_range("/image.iso", 50, 60)
+    sleeps = []
+    with pytest.raises(RetriesExhaustedError):
+        downloader.run_passes(
+            *pass_setup[:4], 5, 8, sleep=sleeps.append
+        )
+    assert sleeps == [2, 4, 8, 16, 32, 60, 60, 60]
+
+
+def test_always_corrupt_chunk_gets_one_pass_plus_five_retries(pass_setup):
+    server = pass_setup[4]
+    server.corrupt_range("/image.iso", 50, 60)
+    sleeps = []
+    with pytest.raises(RetriesExhaustedError) as excinfo:
+        downloader.run_passes(*pass_setup[:4], 5, 5, sleep=sleeps.append)
+    assert excinfo.value.exit_code == ExitCode.RETRIES_EXHAUSTED
+    assert sleeps == [2, 4, 8, 16, 32]
+    chunk_1 = [r for r in server.requests if r.range == "bytes=50-99"]
+    assert len(chunk_1) == 6
+    assert "1" in str(excinfo.value)
+    assert disk_states(pass_setup) == "CFCCC"
+
+
+def test_message_has_the_number_of_failed_chunks(pass_setup):
+    server = pass_setup[4]
+    server.corrupt_range("/image.iso", 0, 250)
+    with pytest.raises(RetriesExhaustedError) as excinfo:
+        downloader.run_passes(*pass_setup[:4], 5, 1, sleep=lambda s: None)
+    assert "5 chunks" in str(excinfo.value)
+
+
+def test_max_retries_zero_means_a_single_pass(pass_setup):
+    server = pass_setup[4]
+    server.corrupt_range("/image.iso", 50, 60)
+    sleeps = []
+    with pytest.raises(RetriesExhaustedError):
+        downloader.run_passes(*pass_setup[:4], 5, 0, sleep=sleeps.append)
+    assert sleeps == []
+    assert len(server.requests) == 5
+
+
+def test_retry_events_announce_each_retry_pass(pass_setup):
+    pass_setup[4].corrupt_range("/image.iso", 50, 60)
+    received = []
+    with pytest.raises(RetriesExhaustedError):
+        downloader.run_passes(
+            *pass_setup[:4], 5, 2, sleep=lambda s: None, listener=received.append
+        )
+    assert [e for e in received if isinstance(e, events.RetryStarted)] == [
+        events.RetryStarted(attempt=1, max_retries=2, pending=1),
+        events.RetryStarted(attempt=2, max_retries=2, pending=1),
+    ]
+
+
+def test_passes_cut_short_by_the_network_are_retried(pass_setup):
+    # Three failures end the first pass; the retry pass finishes the job.
+    pass_setup[4].cut_connection_after("/image.iso", 10, times=3)
+    assert run_passes(pass_setup) == [2]
+    assert disk_states(pass_setup) == "CCCCC"
+
+
+def test_default_sleep_is_time_sleep(pass_setup, monkeypatch):
+    pass_setup[4].cut_connection_after("/image.iso", 10, times=1)
+    waits = []
+    monkeypatch.setattr("time.sleep", waits.append)
+    downloader.run_passes(*pass_setup[:4], 5, 5)
+    assert waits == [2]

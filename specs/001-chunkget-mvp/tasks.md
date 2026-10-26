@@ -342,7 +342,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Recorre los fragmentos que no están en `C`, actualiza el estado tras cada uno (`C` o `F`), continúa tras un hash incorrecto y emite eventos. Corta la pasada tras 3 fallos de red consecutivos.
   - Hecho cuando: tests comprueban que: un fragmento corrupto queda `F` y los siguientes se descargan; el estado en disco se actualiza tras cada fragmento (comprobado leyendo el fichero entre fragmentos); y con la red caída la pasada termina tras 3 fallos dejando el resto en `P`.
 
-- [ ] **T50 — Pasadas de reintento**
+- [x] **T50 — Pasadas de reintento**
   - RF/RNF: RF10, D7
   - Depende de: T49
   - Repite sobre `F`/`P` hasta `max_retries` pasadas, con la espera `min(2×2^(n−1), 60)` s mediante una función de pausa inyectable.
