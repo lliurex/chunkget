@@ -389,7 +389,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T52
   - Hecho cuando: tests comprueban que `restart=True` descarta el estado y vuelve a descargar todos los fragmentos, y que un estado cuyo destino ya no existe se descarta con un evento de aviso y se hace una descarga nueva.
 
-- [ ] **T59 — Sin ficheros temporales**
+- [x] **T59 — Sin ficheros temporales**
   - RF/RNF: RF7, criterio de finalización 2, constitución §5
   - Depende de: T52
   - Hecho cuando: un test lista el directorio de destino antes, durante (desde el *listener*) y después de una descarga y comprueba que solo existe el fichero destino; en el directorio de estado solo hay `<key>.json` y `<key>.lock`, sin copias del contenido ni `.tmp` residual.

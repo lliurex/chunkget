@@ -1453,3 +1453,94 @@ def test_no_warning_on_restart(full_setup):
     received = []
     download(full_setup, restart=True, overwrite=True, listener=received.append)
     assert not any(isinstance(e, events.StaleStateDiscarded) for e in received)
+
+
+# --- No temporary files (T59) ---
+
+
+@pytest.fixture
+def clean_dirs(full_setup, tmp_path):
+    """The usual setup, with the destination alone in its own directory."""
+    manifest_path, _destination, state_dir, server = full_setup
+    destination_dir = tmp_path / "dest"
+    destination_dir.mkdir()
+    return manifest_path, destination_dir / "out.iso", state_dir, server
+
+
+def names(directory):
+    return sorted(p.name for p in directory.iterdir())
+
+
+def test_destination_directory_only_has_the_destination(clean_dirs):
+    manifest_path, destination, state_dir, _server = clean_dirs
+    directory = destination.parent
+    assert names(directory) == []
+    during = []
+
+    def listener(event):
+        during.append(names(directory))
+
+    downloader.download(
+        manifest_path, destination, state_dir, timeout=5, max_retries=0, listener=listener
+    )
+    assert during and all(listing == ["out.iso"] for listing in during)
+    assert names(directory) == ["out.iso"]
+
+
+def test_state_directory_only_has_the_state_and_the_lock(clean_dirs):
+    manifest_path, destination, state_dir, _server = clean_dirs
+    during = []
+
+    def listener(event):
+        during.append(names(state_dir))
+
+    downloader.download(
+        manifest_path, destination, state_dir, timeout=5, max_retries=0, listener=listener
+    )
+    manifest = downloader.resolve_manifest(manifest_path)
+    key = state_module.state_key(manifest.global_hash, destination)
+    expected = sorted([key + ".json", key + ".lock"])
+    assert names(state_dir) == expected
+    assert all(listing == expected for listing in during)
+
+
+def test_no_temporary_files_after_an_interruption_and_a_resume(clean_dirs):
+    manifest_path, destination, state_dir, _server = clean_dirs
+
+    def interrupt(event):
+        if isinstance(event, events.ChunkDone) and event.index == 1:
+            raise InterruptedByUser("stop")
+
+    with pytest.raises(InterruptedByUser):
+        downloader.download(
+            manifest_path, destination, state_dir, timeout=5, listener=interrupt
+        )
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    assert names(destination.parent) == ["out.iso"]
+    assert len(names(state_dir)) == 2
+    assert not any(name.endswith(".tmp") for name in names(state_dir))
+
+
+def test_no_temporary_files_after_failed_chunks_and_retries(clean_dirs):
+    manifest_path, destination, state_dir, server = clean_dirs
+    server.corrupt_range("/image.iso", 50, 60)
+    with pytest.raises(RetriesExhaustedError):
+        downloader.download(
+            manifest_path,
+            destination,
+            state_dir,
+            timeout=5,
+            max_retries=2,
+            sleep=lambda seconds: None,
+        )
+    assert names(destination.parent) == ["out.iso"]
+    assert len(names(state_dir)) == 2
+
+
+def test_the_state_never_holds_file_content(clean_dirs):
+    manifest_path, destination, state_dir, _server = clean_dirs
+    downloader.download(manifest_path, destination, state_dir, timeout=5)
+    total = sum(p.stat().st_size for p in state_dir.iterdir())
+    assert total < len(CONTENT) * 10
+    for path in state_dir.iterdir():
+        assert CONTENT[:40] not in path.read_bytes()
