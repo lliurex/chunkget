@@ -397,3 +397,87 @@ def test_existing_output_manifest_is_protected(served, tmp_path):
         from_url(served, tmp_path, local_file=local)
     from_url(served, tmp_path, local_file=local, overwrite=True)
     check_manifest(tmp_path / "out.manifest", served, "f.iso")
+
+
+# --- Errors of a remote source (T64) ---
+
+import socket
+
+
+def assert_remote_source_error(error, tmp_path):
+    assert error.value.exit_code == ExitCode.SOURCE_ERROR
+    assert str(error.value)
+    assert list(tmp_path.glob("*.manifest")) == []
+
+
+def test_404_is_a_source_error(http_server, tmp_path):
+    target = tmp_path / "copy.iso"
+    with pytest.raises(SourceError) as error:
+        from_url(http_server.url("/missing"), tmp_path, download_to=target)
+    assert_remote_source_error(error, tmp_path)
+    assert not target.exists()
+
+
+def test_host_that_does_not_resolve_is_a_source_error(monkeypatch, tmp_path):
+    def no_such_host(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", no_such_host)
+    with pytest.raises(SourceError) as error:
+        from_url("http://no-such-host.example/file.iso", tmp_path,
+                 download_to=tmp_path / "copy.iso")
+    assert_remote_source_error(error, tmp_path)
+
+
+def test_connection_refused_is_a_source_error(tmp_path):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with pytest.raises(SourceError) as error:
+        from_url("http://127.0.0.1:%d/file.iso" % port, tmp_path,
+                 download_to=tmp_path / "copy.iso")
+    assert_remote_source_error(error, tmp_path)
+
+
+def test_timeout_is_a_source_error(tmp_path):
+    # Accepts connections in the kernel backlog but never answers.
+    with socket.socket() as silent:
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        url = "http://127.0.0.1:%d/file.iso" % silent.getsockname()[1]
+        with pytest.raises(SourceError) as error:
+            from_url(url, tmp_path, download_to=tmp_path / "copy.iso", timeout=0.2)
+    assert_remote_source_error(error, tmp_path)
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "http:///x"])
+def test_scheme_not_allowed_or_missing_host_is_a_source_error(url, tmp_path):
+    with pytest.raises(SourceError) as error:
+        from_url(url, tmp_path, download_to=tmp_path / "copy.iso")
+    assert_remote_source_error(error, tmp_path)
+    assert not (tmp_path / "copy.iso").exists()
+
+
+def test_redirect_to_another_scheme_is_a_source_error(http_server, tmp_path):
+    http_server.redirect("/r.iso", "file:///etc/passwd")
+    with pytest.raises(SourceError) as error:
+        from_url(http_server.url("/r.iso"), tmp_path, download_to=tmp_path / "c.iso")
+    assert_remote_source_error(error, tmp_path)
+
+
+def test_errors_with_a_local_file_option_do_not_apply_to_the_url(
+    http_server, tmp_path
+):
+    # With a local copy the URL is only recorded, never contacted.
+    local = tmp_path / "f.iso"
+    local.write_bytes(CONTENT)
+    output = from_url(http_server.url("/missing"), tmp_path, local_file=local)
+    assert manifest.load_manifest_file(output).url == http_server.url("/missing")
+
+
+def test_missing_local_file_with_a_remote_source_is_a_source_error(
+    http_server, tmp_path
+):
+    with pytest.raises(SourceError) as error:
+        from_url(http_server.url("/x"), tmp_path, local_file=tmp_path / "missing.iso")
+    assert_remote_source_error(error, tmp_path)

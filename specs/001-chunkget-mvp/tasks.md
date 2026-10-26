@@ -421,7 +421,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Con una URL de origen: o descarga el fichero a la ruta indicada (con `simple_download`) o usa un fichero local indicado; después genera el manifest como en RF2, con `url` igual a la URL de origen y `name` igual al nombre base del fichero local.
   - Hecho cuando: tests con el servidor comprueban ambos caminos y que el manifest resultante tiene `url` = la del servidor, `name` correcto y los hashes de los bytes servidos.
 
-- [ ] **T64 — Errores del origen remoto**
+- [x] **T64 — Errores del origen remoto**
   - RF/RNF: RF4
   - Depende de: T63
   - Hecho cuando: tests comprueban `SourceError` (3) para: 404, host que no resuelve, timeout y esquema no permitido; y que no queda manifest de salida.
