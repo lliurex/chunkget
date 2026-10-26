@@ -415,7 +415,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Depende de: T60
   - Hecho cuando: tests comprueban `SourceError` (3) para: ruta inexistente, directorio, sin permiso de lectura; y que no se crea ningún fichero de salida.
 
-- [ ] **T63 — Origen remoto: descargar o usar fichero local**
+- [x] **T63 — Origen remoto: descargar o usar fichero local**
   - RF/RNF: RF3
   - Depende de: T61, T31
   - Con una URL de origen: o descarga el fichero a la ruta indicada (con `simple_download`) o usa un fichero local indicado; después genera el manifest como en RF2, con `url` igual a la URL de origen y `name` igual al nombre base del fichero local.

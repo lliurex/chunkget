@@ -259,3 +259,141 @@ def test_error_message_is_translatable(tmp_path):
     finally:
         i18n.set_translation(previous)
     assert str(error.value).startswith("«T»cannot read")
+
+
+# --- Remote source: download or use a local file (T63) ---
+
+from chunkget.errors import DestinationExistsError
+
+
+@pytest.fixture
+def served(http_server):
+    return http_server.serve("/remote.iso", CONTENT)
+
+
+def from_url(url, tmp_path, **kwargs):
+    options = dict(output=tmp_path / "out.manifest", chunk_size=100, timeout=5)
+    options.update(kwargs)
+    return publisher.make_manifest_from_url(url, **options)
+
+
+def check_manifest(path, url, name):
+    loaded = manifest.load_manifest_file(path)
+    assert loaded.url == url
+    assert loaded.name == name
+    assert loaded.size == 250
+    assert loaded.global_hash == "sha256:" + hashlib.sha256(CONTENT).hexdigest()
+    for chunk in loaded.chunks:
+        part = CONTENT[chunk.start : chunk.end]
+        assert chunk.hash == "sha256:" + hashlib.sha256(part).hexdigest()
+
+
+def test_download_then_manifest(served, tmp_path):
+    target = tmp_path / "files" / "my_copy.iso"
+    target.parent.mkdir()
+    output = from_url(served, tmp_path, download_to=target)
+    assert target.read_bytes() == CONTENT
+    check_manifest(output, served, "my_copy.iso")
+
+
+def test_url_of_the_manifest_is_the_origin_not_the_local_path(served, tmp_path):
+    target = tmp_path / "copy.iso"
+    output = from_url(served, tmp_path, download_to=target)
+    assert manifest.load_manifest_file(output).url == served
+
+
+def test_existing_local_file_is_used_without_downloading(served, http_server, tmp_path):
+    local = tmp_path / "already_here.iso"
+    local.write_bytes(CONTENT)
+    output = from_url(served, tmp_path, local_file=local)
+    check_manifest(output, served, "already_here.iso")
+    assert http_server.requests == []
+
+
+def test_local_file_that_does_not_match_the_server_is_still_hashed_as_is(
+    served, tmp_path
+):
+    local = tmp_path / "other.iso"
+    local.write_bytes(b"different")
+    output = from_url(served, tmp_path, local_file=local)
+    assert manifest.load_manifest_file(output).size == 9
+
+
+def test_exactly_one_of_download_to_and_local_file_is_needed(served, tmp_path):
+    with pytest.raises(ValueError):
+        from_url(served, tmp_path)
+    with pytest.raises(ValueError):
+        from_url(
+            served, tmp_path, download_to=tmp_path / "a", local_file=tmp_path / "b"
+        )
+
+
+def test_existing_download_target_needs_confirmation(served, http_server, tmp_path):
+    target = tmp_path / "copy.iso"
+    target.write_bytes(b"precious")
+    with pytest.raises(DestinationExistsError) as excinfo:
+        from_url(served, tmp_path, download_to=target)
+    assert excinfo.value.exit_code == ExitCode.USER_DECLINED
+    assert target.read_bytes() == b"precious"
+    assert http_server.requests == []
+    assert not (tmp_path / "out.manifest").exists()
+
+
+def test_overwrite_download_replaces_the_target(served, tmp_path):
+    target = tmp_path / "copy.iso"
+    target.write_bytes(b"precious " * 100)
+    output = from_url(served, tmp_path, download_to=target, overwrite_download=True)
+    assert target.read_bytes() == CONTENT
+    check_manifest(output, served, "copy.iso")
+
+
+def test_interrupted_download_is_resumed_before_the_manifest(
+    served, http_server, tmp_path
+):
+    http_server.cut_connection_after("/remote.iso", 40, times=1)
+    target = tmp_path / "copy.iso"
+    waits = []
+    output = from_url(served, tmp_path, download_to=target, sleep=waits.append)
+    assert waits == [2]
+    check_manifest(output, served, "copy.iso")
+
+
+def test_download_that_keeps_failing_writes_no_manifest(served, http_server, tmp_path):
+    from chunkget.errors import NetworkError
+
+    http_server.cut_connection_after("/remote.iso", 40)
+    with pytest.raises(NetworkError):
+        from_url(
+            served,
+            tmp_path,
+            download_to=tmp_path / "copy.iso",
+            max_retries=2,
+            sleep=lambda seconds: None,
+        )
+    assert not (tmp_path / "out.manifest").exists()
+
+
+def test_other_schemes_are_rejected(tmp_path):
+    with pytest.raises(SourceError):
+        from_url("file:///etc/passwd", tmp_path, download_to=tmp_path / "x")
+
+
+def test_output_options_are_honoured(served, tmp_path):
+    local = tmp_path / "f.iso"
+    local.write_bytes(CONTENT)
+    output = from_url(
+        served, tmp_path, local_file=local, algorithm="sha3_256", chunk_size=50
+    )
+    loaded = manifest.load_manifest_file(output)
+    assert loaded.global_hash.startswith("sha3_256:")
+    assert len(loaded.chunks) == 5
+
+
+def test_existing_output_manifest_is_protected(served, tmp_path):
+    local = tmp_path / "f.iso"
+    local.write_bytes(CONTENT)
+    (tmp_path / "out.manifest").write_bytes(b"previous")
+    with pytest.raises(OutputExistsError):
+        from_url(served, tmp_path, local_file=local)
+    from_url(served, tmp_path, local_file=local, overwrite=True)
+    check_manifest(tmp_path / "out.manifest", served, "f.iso")
