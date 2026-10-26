@@ -190,3 +190,30 @@ def test_listener_receives_one_event_per_chunk(tmp_path):
         events.ChunkDone(index=1, total=3, bytes=1000),
         events.ChunkDone(index=2, total=3, bytes=500),
     ]
+
+
+def test_url_may_be_a_function_called_after_reading_the_file(tmp_path):
+    source = tmp_path / "f.bin"
+    source.write_bytes(b"x" * 250)
+    order = []
+
+    def url():
+        order.append("url")
+        return "http://example.com/f.bin"
+
+    def listener(event):
+        order.append("chunk")
+
+    built = manifest_builder.build_manifest(source, url, 100, listener=listener)
+    assert built.url == "http://example.com/f.bin"
+    assert order == ["chunk", "chunk", "chunk", "url"]
+
+
+def test_url_function_is_not_called_if_the_file_cannot_be_read(tmp_path):
+    from chunkget.errors import SourceError
+
+    def url():
+        raise AssertionError("must not be called")
+
+    with pytest.raises(SourceError):
+        manifest_builder.build_manifest(tmp_path / "missing", url, 100)

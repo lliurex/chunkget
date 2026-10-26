@@ -1544,3 +1544,11 @@ def test_the_state_never_holds_file_content(clean_dirs):
     assert total < len(CONTENT) * 10
     for path in state_dir.iterdir():
         assert CONTENT[:40] not in path.read_bytes()
+
+
+def test_is_url():
+    assert downloader.is_url("http://example.com/m")
+    assert downloader.is_url("HTTPS://example.com/m")
+    assert downloader.is_url("ftp://example.com/m")
+    assert not downloader.is_url("dir/m.manifest")
+    assert not downloader.is_url("/abs/path:with-colon")

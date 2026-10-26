@@ -53,7 +53,11 @@ def compute_chunks(path, chunk_size, algorithm, listener=None):
 def build_manifest(
     path, url, chunk_size=None, algorithm=None, listener=None
 ):
-    """Build a validated ``Manifest`` for the local file ``path``."""
+    """Build a validated ``Manifest`` for the local file ``path``.
+
+    ``url`` is a string or a function returning one; the function is called
+    once the file has been read, so the URL can be asked for as the last step.
+    """
     if chunk_size is None:
         chunk_size = config.DEFAULT_CHUNK_SIZE
     if algorithm is None:
@@ -68,6 +72,8 @@ def build_manifest(
                 path=path, reason=error.strerror or error
             )
         ) from None
+    if callable(url):
+        url = url()
     manifest = Manifest(
         protocol_version=PROTOCOL_VERSION,
         name=os.path.basename(path),

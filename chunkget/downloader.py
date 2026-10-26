@@ -20,11 +20,16 @@ from chunkget.i18n import _
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 
 
+def is_url(text):
+    """True if ``text`` looks like a URL (``scheme://``), not a local path."""
+    return _URL_RE.match(str(text)) is not None
+
+
 def read_manifest(source, timeout):
     """Return ``(manifest, data)``: the validated manifest and, if it came
     from a URL, the bytes received (``None`` for a local file)."""
     text = str(source)
-    if _URL_RE.match(text):
+    if is_url(text):
         http.validate_url(text)
         data = http.fetch_bytes(text, config.MAX_MANIFEST_BYTES, timeout)
         return manifest.load_manifest(data), data

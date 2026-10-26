@@ -448,7 +448,7 @@ La spec (RF6) y el plan (D5 y 7.4) coinciden: un manifest indicado por URL se de
   - Conecta `--chunk-size`, `--algorithm`, `--max-retries` y `--timeout` con los validadores.
   - Hecho cuando: tests comprueban que: `--algorithm md5` termina con 2 y el mensaje lista los algoritmos válidos; `--chunk-size 0` y `--max-retries 101` terminan con 2 e indican el rango; y sin opciones se usan los valores por defecto.
 
-- [ ] **T68 — `make-manifest` con origen local**
+- [x] **T68 — `make-manifest` con origen local**
   - RF/RNF: RF2
   - Depende de: T67, T60
   - Con `--url` genera sin preguntar; sin `--url` solicita la URL como último paso (stdin simulada) y la vuelve a pedir si es vacía o inválida; sin terminal ni `--url` termina con 2. Imprime `Manifest written: <ruta>` en stdout.

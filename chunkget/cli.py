@@ -4,8 +4,8 @@ import argparse
 import sys
 
 import chunkget
-from chunkget import config, hashing
-from chunkget.errors import ChunkgetError, ExitCode, UsageError
+from chunkget import config, downloader, hashing, http, publisher
+from chunkget.errors import ChunkgetError, ExitCode, SourceError, UsageError
 from chunkget.i18n import _
 
 
@@ -30,6 +30,17 @@ def build_parser():
         description=_("Generate the manifest that describes a file."),
     )
     make.add_argument("source", metavar="SOURCE", help=_("local file or http(s) URL"))
+    make.add_argument(
+        "-o",
+        "--output",
+        metavar="OUTPUT",
+        help=_("manifest to write (default: ./<name>.chunkget.manifest)"),
+    )
+    make.add_argument(
+        "--url",
+        metavar="URL",
+        help=_("URL the file will be downloaded from (asked for if missing)"),
+    )
     make.add_argument(
         "--chunk-size",
         metavar="SIZE",
@@ -117,7 +128,62 @@ def resolve_options(args):
 
 
 def _make_manifest(args):
-    return _not_implemented()
+    if downloader.is_url(args.source):
+        return _not_implemented()
+    url = args.url
+    if url is None:
+        if not _is_interactive():
+            raise UsageError(
+                _("the download URL is needed: use --url (there is no terminal to ask)")
+            )
+        # Not called here: build_manifest calls it after reading the file, so
+        # the URL is the last thing asked (RF2).
+        url = _ask_url
+    else:
+        url = _checked_url(url)
+    written = publisher.make_manifest(
+        args.source,
+        url,
+        args.output,
+        chunk_size=args.chunk_size,
+        algorithm=args.algorithm,
+    )
+    print(_("Manifest written: {path}").format(path=written))
+    return ExitCode.OK
+
+
+def _is_interactive():
+    return sys.stdin is not None and sys.stdin.isatty()
+
+
+def _ask(prompt):
+    """Ask on stderr and read the answer; None if the input has ended."""
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    line = sys.stdin.readline()
+    if not line:
+        sys.stderr.write("\n")
+        return None
+    return line.strip()
+
+
+def _checked_url(url):
+    try:
+        return http.validate_url(url)
+    except SourceError as error:
+        raise UsageError(_("invalid --url: {reason}").format(reason=error)) from None
+
+
+def _ask_url():
+    """Ask for the download URL until a valid one is given (RF2)."""
+    while True:
+        answer = _ask(_("Download URL of the file: "))
+        if answer is None:
+            raise UsageError(_("no valid download URL was given"))
+        try:
+            return http.validate_url(answer)
+        except SourceError as error:
+            print(str(error), file=sys.stderr)
 
 
 def _download(args):
